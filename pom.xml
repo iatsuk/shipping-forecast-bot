@@ -40,6 +40,18 @@
   </dependencyManagement>
 
   <dependencies>
+    <!-- telegram bot api -->
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-longpolling</artifactId>
+      <version>8.2.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-client</artifactId>
+      <version>8.2.0</version>
+    </dependency>
+    <!-- testing -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>
