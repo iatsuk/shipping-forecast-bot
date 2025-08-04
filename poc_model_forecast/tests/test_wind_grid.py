@@ -24,14 +24,28 @@ def test_fetch_noon_wind_returns_values(poc):
     assert speed == 2.0 and direction == 100.0
 
 
-def test_fetch_wind_grid_shape(monkeypatch, poc):
-    def fake_fetch(lat, lon, model):
-        return 1.0, 90.0
-
-    monkeypatch.setattr(poc, "fetch_noon_wind", fake_fetch)
-    lats, lons, speeds, directions = poc.fetch_wind_grid(0.0, 0.0, "gfs", size=3)
+def test_fetch_wind_grid_shape(poc):
+    data = {
+        "latitude": [-1.0, 0.0, 1.0],
+        "longitude": [-1.0, 0.0, 1.0],
+        "hourly": {
+            "time": ["2024-01-01T00:00", "2024-01-01T12:00"],
+            "windspeed_10m": [
+                [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 0.0]],
+            ],
+            "winddirection_10m": [
+                [[0.0, 0.0, 0.0], [0.0, 90.0, 0.0], [0.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 0.0]],
+            ],
+        },
+    }
+    with patch("requests.get", return_value=_mock_response(data)) as mock_get:
+        with patch.object(poc, "next_noon", return_value=datetime(2024, 1, 1, 12)):
+            lats, lons, speeds, directions = poc.fetch_wind_grid(0.0, 0.0, "gfs", size=3)
+    params = mock_get.call_args.kwargs["params"]
+    assert params["latitude_min"] == -1.0 and params["latitude_max"] == 1.0
     assert len(lats) == 3 and len(lons) == 3
-    assert all(len(row) == 3 for row in speeds)
-    assert speeds[1][1] == 1.0
-    assert directions[1][1] == 90.0
+    assert speeds[1][1] == 2.0 and directions[1][1] == 100.0
+    assert mock_get.call_count == 1
 

@@ -1,4 +1,12 @@
+import pytest
+
+
 def test_render_forecast_table(tmp_path, poc):
+    try:
+        import PIL  # noqa: F401
+    except Exception:
+        pytest.skip("Pillow not installed")
+
     data = {
         "m1": [
             {"time": "t0", "wind": 1, "gust": 2},
@@ -9,17 +17,14 @@ def test_render_forecast_table(tmp_path, poc):
             {"time": "t1", "wind": 7, "gust": 8},
         ],
     }
-    output = tmp_path / "table.svg"
+    output = tmp_path / "table.png"
     poc.render_forecast_table(data, str(output))
-    assert output.exists()
-    text = output.read_text()
-    assert "m1 wind" in text and "t1" in text
+    assert output.exists() and output.stat().st_size > 0
 
 
-def test_render_forecast_table_handles_none(tmp_path, poc):
+def test_format_forecast_lines_handles_none(poc):
     data = {"m1": [{"time": "t0", "wind": None, "gust": None}]}
-    output = tmp_path / "table.svg"
-    poc.render_forecast_table(data, str(output))
-    text = output.read_text()
-    assert "-" in text
-    assert "None" not in text
+    lines = poc.format_forecast_lines(data)
+    assert "-" in lines[1]
+    assert "None" not in lines[1]
+
