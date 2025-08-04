@@ -1,12 +1,4 @@
-import sys
-import pathlib
-
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
-
-from poc_model_forecast.svg_table import render_forecast_table
-
-
-def test_render_forecast_table(tmp_path):
+def test_render_forecast_table(tmp_path, poc):
     data = {
         "m1": [
             {"time": "t0", "wind": 1, "gust": 2},
@@ -18,16 +10,16 @@ def test_render_forecast_table(tmp_path):
         ],
     }
     output = tmp_path / "table.svg"
-    render_forecast_table(data, str(output))
+    poc.render_forecast_table(data, str(output))
     assert output.exists()
     text = output.read_text()
     assert "m1 wind" in text and "t1" in text
 
 
-def test_render_forecast_table_handles_none(tmp_path):
+def test_render_forecast_table_handles_none(tmp_path, poc):
     data = {"m1": [{"time": "t0", "wind": None, "gust": None}]}
     output = tmp_path / "table.svg"
-    render_forecast_table(data, str(output))
+    poc.render_forecast_table(data, str(output))
     text = output.read_text()
     assert "-" in text
     assert "None" not in text
