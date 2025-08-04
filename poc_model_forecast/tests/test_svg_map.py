@@ -12,3 +12,11 @@ def test_create_wind_map_creates_file(tmp_path):
     assert output.exists()
     content = output.read_text()
     assert "<svg" in content and "<line" in content
+
+
+def test_create_wind_map_handles_missing_values(tmp_path):
+    output = tmp_path / "map.svg"
+    create_wind_map(0.0, 0.0, None, None, str(output))
+    assert output.exists()
+    content = output.read_text()
+    assert "<svg" in content and "<line" in content

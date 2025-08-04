@@ -3,11 +3,18 @@
 import math
 
 
-def create_wind_map(lat: float, lon: float, direction: float, speed: float, output_path: str, size: int = 200) -> str:
+def create_wind_map(
+    lat: float,
+    lon: float,
+    direction: float | None,
+    speed: float | None,
+    output_path: str,
+    size: int = 200,
+) -> str:
     """Render a minimal wind map as an SVG file.
 
-    The function draws a line representing wind direction and uses
-    wind speed to scale the arrow length.
+    A line shows wind direction and length scaled by speed. Missing values are
+    treated as zero to stay robust when the API omits data.
 
     Args:
         lat: Latitude in degrees (informational only).
@@ -20,9 +27,11 @@ def create_wind_map(lat: float, lon: float, direction: float, speed: float, outp
     Returns:
         The path to the written SVG file.
     """
+    speed_val = float(speed) if speed is not None else 0.0
+    direction_val = float(direction) if direction is not None else 0.0
     center = size // 2
-    length = min(center, int(speed * 2))
-    angle = math.radians(270 - direction)
+    length = min(center, int(speed_val * 2))
+    angle = math.radians(270 - direction_val)
     end_x = center + length * math.cos(angle)
     end_y = center + length * math.sin(angle)
     svg = [
