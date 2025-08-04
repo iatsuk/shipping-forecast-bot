@@ -22,8 +22,10 @@ def render_forecast_table(forecasts: Dict[str, List[Dict[str, Any]]], output_pat
     for i in range(min(48, hours)):
         row = [forecasts[model_names[0]][i]["time"]]
         for name in model_names:
-            row.append(str(forecasts[name][i]["wind"]))
-            row.append(str(forecasts[name][i]["gust"]))
+            wind = forecasts[name][i]["wind"]
+            gust = forecasts[name][i]["gust"]
+            row.append(str(wind) if wind is not None else "-")
+            row.append(str(gust) if gust is not None else "-")
         lines.append(" ".join(row))
     svg_lines = []
     for idx, text in enumerate(lines, start=1):

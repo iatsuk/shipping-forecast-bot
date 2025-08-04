@@ -24,9 +24,15 @@ def test_fetch_forecast_returns_data():
             "winddirection_10m": [90, 100],
         }
     }
-    with patch("poc_model_forecast.forecast.requests.get", return_value=_mock_response(data)) as mock_get:
+    with patch(
+        "poc_model_forecast.forecast.requests.get",
+        return_value=_mock_response(data),
+    ) as mock_get:
         result = fetch_forecast(1.0, 2.0, ["m1"])
+        params = mock_get.call_args.kwargs["params"]
     assert "m1" in result
     assert result["m1"][0]["wind"] == 5
     assert len(result["m1"]) == 2
-    assert mock_get.called
+    # Verify we request knots from the API and specify the model name.
+    assert params["windspeed_unit"] == "kn"
+    assert params["models"] == "m1"

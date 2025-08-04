@@ -23,6 +23,9 @@ def fetch_forecast(lat: float, lon: float, models: List[str]) -> Dict[str, List[
         "longitude": lon,
         "hourly": "windspeed_10m,windgusts_10m,winddirection_10m",
         "forecast_days": 2,
+        # Request wind speed and gusts in knots so downstream rendering uses
+        # marine friendly units.
+        "windspeed_unit": "kn",
     }
     for model in models:
         params["models"] = model
@@ -31,6 +34,9 @@ def fetch_forecast(lat: float, lon: float, models: List[str]) -> Dict[str, List[
         hourly = response.json()["hourly"]
         records: List[Dict[str, Any]] = []
         for i, ts in enumerate(hourly["time"][:48]):
+            # Open‑Meteo occasionally returns ``None`` for early records.
+            # Coerce missing values to ``None`` explicitly and let callers
+            # decide how to display them.
             records.append(
                 {
                     "time": ts,
