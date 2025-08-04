@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import types
 from unittest.mock import patch
 
@@ -19,7 +19,7 @@ def test_fetch_noon_wind_returns_values(poc):
         }
     }
     with patch("requests.get", return_value=_mock_response(data)):
-        with patch.object(poc, "next_noon", return_value=datetime(2024, 1, 1, 12)):
+        with patch.object(poc, "next_noon", return_value=datetime(2024, 1, 1, 12, tzinfo=timezone.utc)):
             speed, direction = poc.fetch_noon_wind(0.0, 0.0, "gfs")
     assert speed == 2.0 and direction == 100.0
 
