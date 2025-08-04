@@ -25,27 +25,14 @@ def test_fetch_noon_wind_returns_values(poc):
 
 
 def test_fetch_wind_grid_shape(poc):
-    data = {
-        "latitude": [-1.0, 0.0, 1.0],
-        "longitude": [-1.0, 0.0, 1.0],
-        "hourly": {
-            "time": ["2024-01-01T00:00", "2024-01-01T12:00"],
-            "windspeed_10m": [
-                [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]],
-                [[0.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 0.0]],
-            ],
-            "winddirection_10m": [
-                [[0.0, 0.0, 0.0], [0.0, 90.0, 0.0], [0.0, 0.0, 0.0]],
-                [[0.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 0.0]],
-            ],
-        },
-    }
-    with patch("requests.get", return_value=_mock_response(data)) as mock_get:
-        with patch.object(poc, "next_noon", return_value=datetime(2024, 1, 1, 12)):
-            lats, lons, speeds, directions = poc.fetch_wind_grid(0.0, 0.0, "gfs", size=3)
-    params = mock_get.call_args.kwargs["params"]
-    assert params["latitude_min"] == -1.0 and params["latitude_max"] == 1.0
-    assert len(lats) == 3 and len(lons) == 3
-    assert speeds[1][1] == 2.0 and directions[1][1] == 100.0
-    assert mock_get.call_count == 1
+    def side_effect(la, lo, model):
+        return la + lo, la - lo
+
+    with patch.object(poc, "fetch_noon_wind", side_effect=side_effect) as mock_fn:
+        lats, lons, speeds, directions = poc.fetch_wind_grid(0.0, 0.0, "gfs", size=3)
+
+    assert lats == [-1.0, 0.0, 1.0]
+    assert lons == [-1.0, 0.0, 1.0]
+    assert speeds[1][1] == 0.0 and directions[1][1] == 0.0
+    assert mock_fn.call_count == 9
 
