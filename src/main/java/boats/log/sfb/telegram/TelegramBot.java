@@ -24,6 +24,7 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
                 // create a send message object
                 String message_text = update.getMessage().getText();
                 long chat_id = update.getMessage().getChatId();
+                System.out.println("Sending message: '" + message_text + "' to " + chat_id);
                 SendMessage message = SendMessage
                         .builder()
                         .chatId(chat_id)
