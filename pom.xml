@@ -46,6 +46,17 @@
       <artifactId>spring-context</artifactId>
       <version>7.0.6</version>
     </dependency>
+    <!-- persistence -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-jdbc</artifactId>
+      <version>7.0.6</version>
+    </dependency>
+    <dependency>
+      <groupId>org.hsqldb</groupId>
+      <artifactId>hsqldb</artifactId>
+      <version>2.7.4</version>
+    </dependency>
     <!-- telegram bot api -->
     <dependency>
       <groupId>org.telegram</groupId>
