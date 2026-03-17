@@ -13,6 +13,11 @@
  
 # Maven
 target/
+.mvn/
+
+# Agents
+.claude/
 
 # Local config (contains secrets)
 src/main/resources/application.properties
+data/
