@@ -13,3 +13,6 @@
  
 # Maven
 target/
+
+# Local config (contains secrets)
+src/main/resources/application.properties
