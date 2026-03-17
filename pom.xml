@@ -24,7 +24,7 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>17</maven.compiler.release>
+    <maven.compiler.release>25</maven.compiler.release>
   </properties>
 
   <dependencyManagement>
@@ -40,6 +40,12 @@
   </dependencyManagement>
 
   <dependencies>
+    <!-- spring core -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+      <version>7.0.6</version>
+    </dependency>
     <!-- telegram bot api -->
     <dependency>
       <groupId>org.telegram</groupId>
