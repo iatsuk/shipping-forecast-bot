@@ -1,5 +1,65 @@
 # architecture.md
 
+---
+
+## Overview
+Abstraction for shipping forecast providers.
+
+## Problem
+The bot must support multiple forecast data sources (e.g. BBC, Met Office). Each source
+has its own URL, publication schedule, geographic coverage, and page format. Without a
+common interface the bot would need to hard-code knowledge of every source throughout the
+codebase, making it fragile and hard to extend.
+
+## Decision
+Introduce a `ForecastProvider` interface that captures the full contract of a data source:
+metadata (name, description, URL, update times, geographic areas) and the parsing behaviour.
+Fetching the page is intentionally left outside the interface so that the HTTP concern can
+evolve independently.
+
+## Structure
+
+- `ForecastProvider` — interface; one method per provider attribute plus `parse`
+- `GeoLocation` — immutable record; `(name, latitude, longitude)` in WGS-84
+- `ShippingForecast` — immutable record; `(location, text)` for one parsed area
+
+All three live in `boats.log.sfb.forecast`.
+
+## Applied Principles / Patterns
+
+- **SOLID — Interface Segregation / Open-Closed**: new providers are added by implementing
+  the interface; existing code is not modified
+- **SOLID — Dependency Inversion**: the bot dispatcher will depend on `ForecastProvider`,
+  not on any concrete scraper
+- **GRASP — Information Expert**: each concrete provider owns all knowledge about how to
+  parse its own page format
+- **GRASP — Protected Variations**: the interface shields the rest of the application from
+  changes in page structure or provider-specific parsing logic
+- **GoF — Strategy**: `ForecastProvider` acts as a strategy; any number of implementations
+  can be swapped or combined at runtime
+
+## Why This Approach
+
+An interface with plain accessor methods was chosen over an abstract class because the
+providers share no common implementation — only a common contract. Records are used for
+`GeoLocation` and `ShippingForecast` because they are pure value objects with no behaviour.
+
+## Tradeoffs
+
+- `parse` receives raw page content as a `String`; providers that need streaming or binary
+  content will require the signature to be revisited.
+- Update times are modelled as `List<LocalTime>` (UTC assumed). Timezone awareness may be
+  needed if providers publish on local-time schedules.
+
+## Notes
+
+- `updateTimes()` and `geoLocations()` must never return an empty list; implementations
+  should enforce this with a precondition check.
+- `parse` must return one `ShippingForecast` per entry in `geoLocations()`, with matching
+  `GeoLocation` references, so callers can correlate them reliably.
+
+---
+
 ## Overview
 Persistence layer for user subscriptions using embedded HSQLDB with Spring JDBC.
 
