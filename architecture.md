@@ -23,7 +23,7 @@ evolve independently.
 - `GeoLocation` — immutable record; `(name, latitude, longitude)` in WGS-84
 - `ShippingForecast` — immutable record; `(location, text)` for one parsed area
 
-All three live in `boats.log.sfb.forecast`.
+All three live in `boats.log.shippingforecast.forecast`.
 
 ## Applied Principles / Patterns
 

@@ -1,4 +1,4 @@
-package boats.log.sfb.forecast;
+package boats.log.shippingforecast.forecast;
 
 /**
  * A named geographic point identifying a forecast area.

@@ -1,6 +1,6 @@
-package boats.log.sfb;
+package boats.log.shippingforecast;
 
-import boats.log.sfb.telegram.TelegramBot;
+import boats.log.shippingforecast.telegram.TelegramBot;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -16,7 +16,7 @@ import javax.sql.DataSource;
 
 @Configuration
 @PropertySource("classpath:application.properties")
-@ComponentScan("boats.log.sfb")
+@ComponentScan("boats.log.shippingforecast")
 public class AppConfig {
 
     @Value("${telegram.bot.token}")

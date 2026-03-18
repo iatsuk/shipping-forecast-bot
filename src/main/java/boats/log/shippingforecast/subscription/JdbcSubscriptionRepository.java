@@ -1,4 +1,4 @@
-package boats.log.sfb.subscription;
+package boats.log.shippingforecast.subscription;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;

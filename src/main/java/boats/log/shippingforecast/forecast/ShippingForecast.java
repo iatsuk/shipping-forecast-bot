@@ -1,4 +1,4 @@
-package boats.log.sfb.forecast;
+package boats.log.shippingforecast.forecast;
 
 /**
  * A parsed shipping forecast for one geographic area.

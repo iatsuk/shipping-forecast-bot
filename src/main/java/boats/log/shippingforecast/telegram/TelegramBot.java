@@ -1,4 +1,4 @@
-package boats.log.sfb.telegram;
+package boats.log.shippingforecast.telegram;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;

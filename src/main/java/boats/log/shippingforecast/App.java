@@ -1,4 +1,4 @@
-package boats.log.sfb;
+package boats.log.shippingforecast;
 
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 

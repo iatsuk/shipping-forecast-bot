@@ -1,4 +1,4 @@
-package boats.log.sfb.forecast;
+package boats.log.shippingforecast.forecast;
 
 import java.time.LocalTime;
 import java.util.List;

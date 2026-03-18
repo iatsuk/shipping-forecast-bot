@@ -1,4 +1,4 @@
-package boats.log.sfb.subscription;
+package boats.log.shippingforecast.subscription;
 
 import java.util.List;
 
