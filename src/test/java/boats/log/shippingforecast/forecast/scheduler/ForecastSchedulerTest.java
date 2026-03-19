@@ -1,5 +1,11 @@
-package boats.log.shippingforecast.forecast;
+package boats.log.shippingforecast.forecast.scheduler;
 
+import boats.log.shippingforecast.forecast.ForecastCache;
+import boats.log.shippingforecast.forecast.ForecastCacheRepository;
+import boats.log.shippingforecast.forecast.ForecastFetcher;
+import boats.log.shippingforecast.forecast.ForecastProvider;
+import boats.log.shippingforecast.forecast.GeoLocation;
+import boats.log.shippingforecast.forecast.ShippingForecast;
 import org.junit.jupiter.api.Test;
 
 import java.time.*;

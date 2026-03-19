@@ -1,5 +1,8 @@
-package boats.log.shippingforecast.forecast;
+package boats.log.shippingforecast.forecast.scheduler;
 
+import boats.log.shippingforecast.forecast.ForecastCacheRepository;
+import boats.log.shippingforecast.forecast.ForecastFetcher;
+import boats.log.shippingforecast.forecast.ForecastProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 

@@ -1,5 +1,6 @@
-package boats.log.shippingforecast.forecast;
+package boats.log.shippingforecast.forecast.infra;
 
+import boats.log.shippingforecast.forecast.ForecastFetcher;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;

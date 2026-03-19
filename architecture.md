@@ -23,7 +23,7 @@ evolve independently.
 - `GeoLocation` — immutable record; `(name, latitude, longitude)` in WGS-84
 - `ShippingForecast` — immutable record; `(location, text)` for one parsed area
 
-All three live in `boats.log.shippingforecast.forecast`.
+All three live in `boats.log.shippingforecast.forecast` alongside the core interfaces (`ForecastProvider`, `ForecastFetcher`, `ForecastCacheRepository`).
 
 ## Applied Principles / Patterns
 
@@ -171,13 +171,18 @@ exercisable in unit tests without real time or real randomness.
 
 ## Structure
 
+**`forecast` package (contracts + domain):**
 - `ForecastCache` — immutable record `(url, content, fetchedAt)`
 - `ForecastCacheRepository` — interface; `save` (upsert) and `findByUrl`
-- `JdbcForecastCacheRepository` — JDBC implementation backed by the `forecast_cache` table
 - `ForecastFetcher` — interface; abstracts HTTP retrieval from scheduling logic
-- `HttpForecastFetcher` — implementation using `java.net.http.HttpClient`
 - `ForecastProvider.isFresh(content, expectedAfter)` — default method (returns `true`);
   override in providers that embed a publication timestamp in the page
+
+**`forecast.infra` package (infrastructure implementations):**
+- `JdbcForecastCacheRepository` — JDBC implementation backed by the `forecast_cache` table
+- `HttpForecastFetcher` — implementation using `java.net.http.HttpClient`
+
+**`forecast.scheduler` package:**
 - `ForecastScheduler` — Spring `@Component`; cron-driven (`0 * * * * *`), holds a
   `Map<url, Duration> fetchJitters` (computed at startup) and a
   `ConcurrentHashMap<url, Instant> pendingRetries` (updated at runtime)
@@ -231,14 +236,14 @@ DWD publishes its bulletin as a public HTML page with a machine-readable
 timestamp and a consistent area structure, making it a good first implementation.
 
 ## Decision
-Implement `DwdForecastProvider` as a `@Component` in the `forecast` package.
+Implement `DwdForecastProvider` as a `@Component` in the `forecast.provider` sub-package.
 No new abstractions are needed; the existing `ForecastProvider` contract covers
 all requirements.
 
 ## Structure
 
-- `DwdForecastProvider` — `@Component`; implements `ForecastProvider` for the DWD
-  North and Baltic Sea bulletin at `dwd.de/…/seewetternordostsee.html`
+- `DwdForecastProvider` (`forecast.provider`) — `@Component`; implements `ForecastProvider`
+  for the DWD North and Baltic Sea bulletin at `dwd.de/…/seewetternordostsee.html`
 
 ## Applied Principles / Patterns
 

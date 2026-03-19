@@ -1,5 +1,7 @@
-package boats.log.shippingforecast.forecast;
+package boats.log.shippingforecast.forecast.infra;
 
+import boats.log.shippingforecast.forecast.ForecastCache;
+import boats.log.shippingforecast.forecast.ForecastCacheRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 

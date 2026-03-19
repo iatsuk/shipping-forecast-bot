@@ -1,5 +1,8 @@
-package boats.log.shippingforecast.forecast;
+package boats.log.shippingforecast.forecast.provider;
 
+import boats.log.shippingforecast.forecast.ForecastProvider;
+import boats.log.shippingforecast.forecast.GeoLocation;
+import boats.log.shippingforecast.forecast.ShippingForecast;
 import org.jsoup.Jsoup;
 import org.springframework.stereotype.Component;
 

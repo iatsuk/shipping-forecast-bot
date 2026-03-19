@@ -1,5 +1,7 @@
-package boats.log.shippingforecast.forecast;
+package boats.log.shippingforecast.forecast.provider;
 
+import boats.log.shippingforecast.forecast.GeoLocation;
+import boats.log.shippingforecast.forecast.ShippingForecast;
 import org.junit.jupiter.api.Test;
 
 import java.time.*;
