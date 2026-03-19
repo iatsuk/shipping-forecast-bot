@@ -219,5 +219,43 @@ across restarts and the deduplication window calculation remains correct.
 ## Notes
 
 - `forecast_cache` DDL is in `schema.sql` alongside `user_subscription`, applied at startup.
-- No `ForecastProvider` implementations exist yet; the scheduler silently does nothing until
-  at least one is registered as a Spring bean.
+---
+
+## Overview
+First concrete `ForecastProvider` implementation: DWD North and Baltic Sea bulletin.
+
+## Problem
+The scheduler needs at least one registered provider to do useful work.
+DWD publishes its bulletin as a public HTML page with a machine-readable
+timestamp and a consistent area structure, making it a good first implementation.
+
+## Decision
+Implement `DwdForecastProvider` as a `@Component` in the `forecast` package.
+No new abstractions are needed; the existing `ForecastProvider` contract covers
+all requirements.
+
+## Structure
+
+- `DwdForecastProvider` — `@Component`; implements `ForecastProvider` for the DWD
+  North and Baltic Sea bulletin at `dwd.de/…/seewetternordostsee.html`
+
+## Applied Principles / Patterns
+
+- **GRASP — Information Expert**: parsing and freshness logic lives entirely in
+  `DwdForecastProvider`; the scheduler has no knowledge of DWD page structure
+- **SOLID — Open-Closed**: adding this provider required zero changes to existing code
+
+## Why This Approach
+
+`updateTimes` expresses 00:15 and 12:15 CET in UTC (23:15 and 11:15).
+`isFresh` parses the embedded timestamp (format `dd.MM.yyyy, HH:mm CET/CEST`)
+and returns `true` only when the bulletin's own date is at or after `expectedAfter`.
+Fail-open when no timestamp is found avoids infinite retries if the page layout changes.
+`parse` strips HTML then slices the plain text between consecutive area headings.
+
+## Tradeoffs
+
+- HTML stripping via regex is fragile if DWD restructures the page significantly;
+  a proper HTML parser (Jsoup) would be more robust but adds a dependency.
+- Area coordinates are approximate centre-points; sub-area precision is not required
+  for subscriber matching at the current level of granularity.
