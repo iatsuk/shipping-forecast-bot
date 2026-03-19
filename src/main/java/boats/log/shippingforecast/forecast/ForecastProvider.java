@@ -2,6 +2,8 @@ package boats.log.shippingforecast.forecast;
 
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -24,10 +26,19 @@ public interface ForecastProvider {
     String url();
 
     /**
-     * Times of day (UTC) at which this provider publishes a new forecast.
-     * The list must not be empty.
+     * Times of day, in the provider's {@link #publishingZone()}, at which a new forecast
+     * is published. The list must not be empty.
      */
     List<LocalTime> updateTimes();
+
+    /**
+     * Timezone in which the update times returned by {@link #updateTimes()} are expressed.
+     * Defaults to UTC. Override when a provider publishes on local clock time so that
+     * DST transitions are handled correctly.
+     */
+    default ZoneId publishingZone() {
+        return ZoneOffset.UTC;
+    }
 
     /**
      * Geographic areas covered by this provider.

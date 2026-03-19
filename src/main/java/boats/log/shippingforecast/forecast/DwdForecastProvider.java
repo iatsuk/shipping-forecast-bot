@@ -1,5 +1,6 @@
 package boats.log.shippingforecast.forecast;
 
+import org.jsoup.Jsoup;
 import org.springframework.stereotype.Component;
 
 import java.time.*;
@@ -10,9 +11,9 @@ import java.util.regex.*;
 /**
  * Forecast provider for the DWD (Deutscher Wetterdienst) North and Baltic Sea bulletin.
  *
- * <p>DWD publishes at approx. 00:15 and 12:15 CET (UTC+1), i.e. 23:15 and 11:15 UTC.
- * The page embeds a publication timestamp in the format "dd.MM.yyyy, HH:mm CET/CEST"
- * which is used by {@link #isFresh} to detect stale content.
+ * <p>DWD publishes at approx. 00:15 and 12:15 local Berlin time (CET/CEST). The page
+ * embeds a publication timestamp in the format "dd.MM.yyyy, HH:mm CET/CEST" which is
+ * used by {@link #isFresh} to detect stale content.
  */
 @Component
 public class DwdForecastProvider implements ForecastProvider {
@@ -20,11 +21,13 @@ public class DwdForecastProvider implements ForecastProvider {
     private static final String URL =
             "https://www.dwd.de/EN/ourservices/seewetternordostseeen/seewetternordostsee.html";
 
-    // 00:15 and 12:15 CET (UTC+1) expressed in UTC
+    // Local Berlin times at which DWD issues the bulletin (00:15 and 12:15)
     private static final List<LocalTime> UPDATE_TIMES = List.of(
-            LocalTime.of(23, 15),
-            LocalTime.of(11, 15)
+            LocalTime.of(0, 15),
+            LocalTime.of(12, 15)
     );
+
+    private static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
 
     // Matches: "19.03.2026, 12:30 CET" or "19.03.2026, 12:30 CEST"
     private static final Pattern TIMESTAMP_PATTERN =
@@ -75,6 +78,12 @@ public class DwdForecastProvider implements ForecastProvider {
         return UPDATE_TIMES;
     }
 
+    /** Berlin time (CET/CEST) so DST transitions are handled correctly. */
+    @Override
+    public ZoneId publishingZone() {
+        return BERLIN;
+    }
+
     @Override
     public List<GeoLocation> geoLocations() {
         return GEO_LOCATIONS;
@@ -105,13 +114,13 @@ public class DwdForecastProvider implements ForecastProvider {
     /**
      * Extracts one {@link ShippingForecast} per covered sea area from the raw HTML.
      *
-     * <p>Each area's text runs from its heading (e.g. "Southwestern North Sea:") up to
-     * the next area heading (or end of content). HTML tags are stripped before splitting
-     * so the parser is insensitive to markup changes.
+     * <p>Jsoup parses the HTML into a DOM and extracts normalised plain text, handling
+     * all entity decoding and whitespace collapsing correctly. The text is then sliced
+     * between consecutive area headings (e.g. "Southwestern North Sea:").
      */
     @Override
     public List<ShippingForecast> parse(String pageContent) {
-        String text = stripHtml(pageContent);
+        String text = Jsoup.parse(pageContent).text();
         List<ShippingForecast> forecasts = new ArrayList<>();
         for (int i = 0; i < AREA_NAMES.size(); i++) {
             String area     = AREA_NAMES.get(i);
@@ -138,21 +147,5 @@ public class DwdForecastProvider implements ForecastProvider {
 
     private int indexOfIgnoreCase(String text, String search, int from) {
         return text.toLowerCase(Locale.ROOT).indexOf(search.toLowerCase(Locale.ROOT), from);
-    }
-
-    /** Strips HTML tags and decodes common HTML entities to produce plain text. */
-    private String stripHtml(String html) {
-        return html
-                .replaceAll("<[^>]+>", " ")
-                .replace("&nbsp;", " ")
-                .replace("&amp;",  "&")
-                .replace("&lt;",   "<")
-                .replace("&gt;",   ">")
-                .replace("&auml;", "ä")
-                .replace("&ouml;", "ö")
-                .replace("&uuml;", "ü")
-                .replaceAll("[ \\t]+", " ")
-                .replaceAll("\\n[ \\t]+", "\n")
-                .strip();
     }
 }

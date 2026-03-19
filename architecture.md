@@ -48,8 +48,9 @@ providers share no common implementation — only a common contract. Records are
 
 - `parse` receives raw page content as a `String`; providers that need streaming or binary
   content will require the signature to be revisited.
-- Update times are modelled as `List<LocalTime>` (UTC assumed). Timezone awareness may be
-  needed if providers publish on local-time schedules.
+- Update times are `List<LocalTime>` expressed in the provider's `publishingZone()`.
+  Defaults to UTC; providers on local-time schedules (e.g. DWD on Europe/Berlin) override
+  this so DST transitions are handled correctly by the scheduler.
 
 ## Notes
 
@@ -212,8 +213,8 @@ across restarts and the deduplication window calculation remains correct.
 - `pendingRetries` is in-memory; a restart clears it. On restart the catch-up window
   re-triggers a fetch immediately, which re-checks freshness, so correctness is preserved
   — only the retry delay is lost.
-- Jitter is computed from `java.util.Random`, not `SecureRandom`; this is intentional
-  (timing offsets do not require cryptographic quality).
+- Jitter uses `RandomGenerator` (the standard Java API), not `SecureRandom`; this is
+  intentional — timing offsets do not require cryptographic quality.
 - `isFresh` receives raw page content as a `String`.
 
 ## Notes
@@ -247,7 +248,8 @@ all requirements.
 
 ## Why This Approach
 
-`updateTimes` expresses 00:15 and 12:15 CET in UTC (23:15 and 11:15).
+`updateTimes` returns 00:15 and 12:15 as local Berlin times; `publishingZone` returns
+`Europe/Berlin` so the scheduler converts them correctly across CET/CEST transitions.
 `isFresh` parses the embedded timestamp (format `dd.MM.yyyy, HH:mm CET/CEST`)
 and returns `true` only when the bulletin's own date is at or after `expectedAfter`.
 Fail-open when no timestamp is found avoids infinite retries if the page layout changes.
@@ -255,7 +257,8 @@ Fail-open when no timestamp is found avoids infinite retries if the page layout 
 
 ## Tradeoffs
 
-- HTML stripping via regex is fragile if DWD restructures the page significantly;
-  a proper HTML parser (Jsoup) would be more robust but adds a dependency.
+- HTML parsing uses Jsoup, which correctly handles entity decoding, whitespace
+  normalisation, and malformed markup. The bulletin text is extracted via `Document.text()`
+  and then split on area headings.
 - Area coordinates are approximate centre-points; sub-area precision is not required
   for subscriber matching at the current level of granularity.

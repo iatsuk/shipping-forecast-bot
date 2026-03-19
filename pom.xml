@@ -68,6 +68,12 @@
       <artifactId>telegrambots-client</artifactId>
       <version>9.5.0</version>
     </dependency>
+    <!-- html parsing -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.22.1</version>
+    </dependency>
     <!-- testing -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

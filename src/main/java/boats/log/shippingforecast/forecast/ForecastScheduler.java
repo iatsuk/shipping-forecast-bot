@@ -105,8 +105,9 @@ public class ForecastScheduler {
      */
     private boolean isScheduledUpdateDue(ForecastProvider provider, Instant now) {
         Duration jitter = fetchJitters.get(provider.url());
+        ZoneId zone = provider.publishingZone();
         return provider.updateTimes().stream().anyMatch(updateTime -> {
-            Instant lastUpdate = mostRecentOccurrenceOf(updateTime, now);
+            Instant lastUpdate = mostRecentOccurrenceOf(updateTime, zone, now);
             Instant jitteredFetch = lastUpdate.plus(jitter);
             boolean inWindow = !now.isBefore(jitteredFetch)
                     && now.isBefore(jitteredFetch.plus(CATCH_UP_WINDOW_MINUTES, ChronoUnit.MINUTES));
@@ -136,15 +137,18 @@ public class ForecastScheduler {
     }
 
     /**
-     * Returns the most recent instant at which {@code time} occurred relative to {@code now}.
-     * If today's occurrence is still in the future, returns yesterday's occurrence instead.
+     * Returns the most recent instant at which {@code time} in {@code zone} occurred
+     * relative to {@code now}. If today's occurrence is still in the future, returns
+     * yesterday's occurrence instead. Using the provider's zone ensures DST transitions
+     * are applied correctly when converting local times to instants.
      */
-    private Instant mostRecentOccurrenceOf(LocalTime time, Instant now) {
-        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
-        Instant todayOccurrence = today.atTime(time).toInstant(ZoneOffset.UTC);
-        return now.isBefore(todayOccurrence)
-                ? todayOccurrence.minus(1, ChronoUnit.DAYS)
+    private Instant mostRecentOccurrenceOf(LocalTime time, ZoneId zone, Instant now) {
+        ZonedDateTime nowZoned = now.atZone(zone);
+        ZonedDateTime todayOccurrence = nowZoned.toLocalDate().atTime(time).atZone(zone);
+        ZonedDateTime occurrence = nowZoned.isBefore(todayOccurrence)
+                ? todayOccurrence.minusDays(1)
                 : todayOccurrence;
+        return occurrence.toInstant();
     }
 
     private boolean cacheIsOlderThan(String url, Instant threshold) {
@@ -155,8 +159,9 @@ public class ForecastScheduler {
 
     /** Returns the most recent scheduled update instant across all of the provider's update times. */
     private Instant lastScheduledUpdateBefore(ForecastProvider provider, Instant now) {
+        ZoneId zone = provider.publishingZone();
         return provider.updateTimes().stream()
-                .map(t -> mostRecentOccurrenceOf(t, now))
+                .map(t -> mostRecentOccurrenceOf(t, zone, now))
                 .max(Instant::compareTo)
                 .orElse(now);
     }

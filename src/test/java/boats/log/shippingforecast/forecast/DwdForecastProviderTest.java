@@ -14,10 +14,15 @@ class DwdForecastProviderTest {
     // --- metadata ---
 
     @Test
-    void updateTimes_areInUtc() {
-        // DWD publishes at 00:15 and 12:15 CET (UTC+1) → 23:15 and 11:15 UTC
+    void updateTimes_areLocalBerlinTimes() {
+        // DWD publishes at 00:15 and 12:15 local Berlin time (CET/CEST)
         assertThat(provider.updateTimes())
-                .containsExactlyInAnyOrder(LocalTime.of(23, 15), LocalTime.of(11, 15));
+                .containsExactlyInAnyOrder(LocalTime.of(0, 15), LocalTime.of(12, 15));
+    }
+
+    @Test
+    void publishingZone_isBerlin() {
+        assertThat(provider.publishingZone()).isEqualTo(ZoneId.of("Europe/Berlin"));
     }
 
     @Test
