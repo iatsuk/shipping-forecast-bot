@@ -1,6 +1,8 @@
 package boats.log.shippingforecast;
 
 import boats.log.shippingforecast.telegram.TelegramBot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -23,6 +25,8 @@ import java.util.random.RandomGenerator;
 @ComponentScan("boats.log.shippingforecast")
 public class AppConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(AppConfig.class);
+
     @Value("${telegram.bot.token}")
     private String token;
 
@@ -30,7 +34,7 @@ public class AppConfig {
     public TelegramBotsLongPollingApplication botsApplication(TelegramBot bot) throws Exception {
         TelegramBotsLongPollingApplication app = new TelegramBotsLongPollingApplication();
         var session = app.registerBot(token, bot);
-        System.out.println("Bot started: " + session.isRunning());
+        log.info("Telegram bot registered, running: {}", session.isRunning());
         return app;
     }
 
@@ -42,9 +46,11 @@ public class AppConfig {
         ds.setPassword("");
 
         // Apply schema on startup — CREATE TABLE IF NOT EXISTS, so safe to run every time.
+        log.info("Initializing database at: ./data/sfb-db");
         ResourceDatabasePopulator populator = new ResourceDatabasePopulator();
         populator.addScript(new ClassPathResource("schema.sql"));
         populator.execute(ds);
+        log.info("Database schema applied");
 
         return ds;
     }

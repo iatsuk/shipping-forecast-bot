@@ -6,12 +6,14 @@ import boats.log.shippingforecast.forecast.ForecastProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Logger;
 import java.util.random.RandomGenerator;
 
 /**
@@ -39,7 +41,7 @@ import java.util.random.RandomGenerator;
 @Component
 public class ForecastScheduler {
 
-    private static final Logger log = Logger.getLogger(ForecastScheduler.class.getName());
+    private static final Logger log = LoggerFactory.getLogger(ForecastScheduler.class);
 
     private static final int CATCH_UP_WINDOW_MINUTES = 30;
     private static final int MIN_JITTER_SECONDS = 120; // 2 minutes
@@ -75,6 +77,16 @@ public class ForecastScheduler {
         this.clock = clock;
         this.random = random;
         this.fetchJitters = computeJitters(providers, random);
+        logRegisteredProviders();
+    }
+
+    private void logRegisteredProviders() {
+        log.info("ForecastScheduler started with {} provider(s)", providers.size());
+        for (ForecastProvider provider : providers) {
+            Duration jitter = fetchJitters.get(provider.url());
+            log.info("  Provider '{}': update times {}, jitter +{}s, url: {}",
+                    provider.name(), provider.updateTimes(), jitter.toSeconds(), provider.url());
+        }
     }
 
     @Scheduled(cron = "0 * * * * *")
@@ -127,15 +139,15 @@ public class ForecastScheduler {
                 // Content has not been updated yet. Schedule a retry rather than caching stale data.
                 Duration delay = randomRetryDelay();
                 pendingRetries.put(provider.url(), now.plus(delay));
-                log.info("Stale content from " + provider.url() + "; retrying in " + delay.toMinutes() + " min");
+                log.info("Stale content from {}; retrying in {} min", provider.url(), delay.toMinutes());
                 return;
             }
 
             pendingRetries.remove(provider.url());
             cacheRepository.save(provider.url(), content, now);
-            log.info("Cached forecast from: " + provider.url());
+            log.info("Cached forecast from: {}", provider.url());
         } catch (IOException e) {
-            log.warning("Failed to fetch forecast from " + provider.url() + ": " + e.getMessage());
+            log.warn("Failed to fetch forecast from {}: {}", provider.url(), e.getMessage());
         }
     }
 
