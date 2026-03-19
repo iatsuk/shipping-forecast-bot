@@ -2,8 +2,24 @@
 
 ---
 
-## Overview
-Abstraction for shipping forecast providers.
+## Forecast Package Structure
+
+**Problem**: The `forecast` package contained scheduler, repository, fetcher, and provider
+classes in a single flat namespace, mixing domain contracts with infrastructure implementations.
+
+**Decision**: Split into sub-packages following the dependency direction rule:
+- `forecast` — domain records and contracts (`GeoLocation`, `ShippingForecast`, `ForecastCache`,
+  `ForecastProvider`, `ForecastFetcher`, `ForecastCacheRepository`)
+- `forecast.provider` — provider implementations (`DwdForecastProvider`)
+- `forecast.infra` — infrastructure implementations (`JdbcForecastCacheRepository`, `HttpForecastFetcher`)
+- `forecast.scheduler` — scheduling orchestration (`ForecastScheduler`)
+
+**Why**: Contracts at the root are stable; implementations in sub-packages can grow without
+cluttering the public surface. Sub-packages depend on `forecast`, never the reverse.
+
+---
+
+## Forecast Provider Abstraction
 
 ## Problem
 The bot must support multiple forecast data sources (e.g. BBC, Met Office). Each source
@@ -22,8 +38,6 @@ evolve independently.
 - `ForecastProvider` — interface; one method per provider attribute plus `parse`
 - `GeoLocation` — immutable record; `(name, latitude, longitude)` in WGS-84
 - `ShippingForecast` — immutable record; `(location, text)` for one parsed area
-
-All three live in `boats.log.shippingforecast.forecast` alongside the core interfaces (`ForecastProvider`, `ForecastFetcher`, `ForecastCacheRepository`).
 
 ## Applied Principles / Patterns
 
@@ -61,22 +75,15 @@ providers share no common implementation — only a common contract. Records are
 
 ---
 
-## Overview
-Persistence layer for user subscriptions using embedded HSQLDB with Spring JDBC.
-
----
+## Subscription Persistence
 
 ## Problem
 The bot needs to remember which forecast areas each Telegram chat has subscribed to, and
 to look up all subscribers when dispatching a forecast. This state must survive restarts.
 
----
-
 ## Decision
 Introduce an embedded HSQLDB file-mode database accessed through Spring JDBC (`JdbcTemplate`).
 The repository pattern is used to isolate persistence details from the rest of the application.
-
----
 
 ## Structure
 
@@ -88,8 +95,6 @@ The repository pattern is used to isolate persistence details from the rest of t
   `ResourceDatabasePopulator`; uses `IF NOT EXISTS` so it is safe to run on every boot
 - `AppConfig` — configures `DataSource` (HSQLDB file mode at `./data/sfb-db`) and `JdbcTemplate`
 
----
-
 ## Applied Principles / Patterns
 
 - **SOLID — Dependency Inversion**: `TelegramBot` and future services depend on
@@ -97,8 +102,6 @@ The repository pattern is used to isolate persistence details from the rest of t
 - **GRASP — Information Expert**: repository owns all knowledge of how subscriptions are stored
 - **GRASP — Protected Variations**: the interface shields the rest of the app from the choice
   of embedded HSQLDB; swapping to PostgreSQL later requires only a new implementation
-
----
 
 ## Why This Approach
 
@@ -112,8 +115,6 @@ HSQLDB embedded file mode was chosen because:
 - Data survives restarts (file-backed, not in-memory)
 - Well-supported by Spring's `EmbeddedDatabaseBuilder` for in-memory testing
 
----
-
 ## Tradeoffs
 
 - `DriverManagerDataSource` creates a new physical connection per operation (no pooling).
@@ -121,8 +122,6 @@ HSQLDB embedded file mode was chosen because:
   becomes a concern.
 - HSQLDB file mode is not suitable for multi-process deployments. If the bot is ever
   scaled horizontally, switch to a networked database and replace `JdbcSubscriptionRepository`.
-
----
 
 ## Notes
 
@@ -133,8 +132,7 @@ HSQLDB embedded file mode was chosen because:
 
 ---
 
-## Overview
-Scheduled fetching of forecast page content with persistent caching per provider URL.
+## Scheduled Forecast Fetching
 
 ## Problem
 Three interrelated concerns had to be addressed together:
@@ -166,8 +164,8 @@ normal catch-up window check is suppressed so the server is not hit on every min
 provider at scheduler startup. Fetch times therefore never land on round minutes, and
 different providers fetch at slightly different offsets.
 
-Both `Clock` and `Random` are injected dependencies so all three behaviours are fully
-exercisable in unit tests without real time or real randomness.
+Both `Clock` and `RandomGenerator` are injected dependencies so all three behaviours are
+fully exercisable in unit tests without real time or real randomness.
 
 ## Structure
 
@@ -178,7 +176,7 @@ exercisable in unit tests without real time or real randomness.
 - `ForecastProvider.isFresh(content, expectedAfter)` — default method (returns `true`);
   override in providers that embed a publication timestamp in the page
 
-**`forecast.infra` package (infrastructure implementations):**
+**`forecast.infra` package:**
 - `JdbcForecastCacheRepository` — JDBC implementation backed by the `forecast_cache` table
 - `HttpForecastFetcher` — implementation using `java.net.http.HttpClient`
 
@@ -225,25 +223,19 @@ across restarts and the deduplication window calculation remains correct.
 ## Notes
 
 - `forecast_cache` DDL is in `schema.sql` alongside `user_subscription`, applied at startup.
+
 ---
 
-## Overview
-First concrete `ForecastProvider` implementation: DWD North and Baltic Sea bulletin.
-
-## Problem
-The scheduler needs at least one registered provider to do useful work.
-DWD publishes its bulletin as a public HTML page with a machine-readable
-timestamp and a consistent area structure, making it a good first implementation.
+## DWD Provider Implementation
 
 ## Decision
-Implement `DwdForecastProvider` as a `@Component` in the `forecast.provider` sub-package.
-No new abstractions are needed; the existing `ForecastProvider` contract covers
-all requirements.
+Implement `DwdForecastProvider` in `forecast.provider` as the first concrete `ForecastProvider`.
+No new abstractions are needed; the existing contract covers all requirements.
 
 ## Structure
 
-- `DwdForecastProvider` (`forecast.provider`) — `@Component`; implements `ForecastProvider`
-  for the DWD North and Baltic Sea bulletin at `dwd.de/…/seewetternordostsee.html`
+- `DwdForecastProvider` — `@Component`; implements `ForecastProvider` for the DWD
+  North and Baltic Sea bulletin at `dwd.de/…/seewetternordostsee.html`
 
 ## Applied Principles / Patterns
 
@@ -258,12 +250,9 @@ all requirements.
 `isFresh` parses the embedded timestamp (format `dd.MM.yyyy, HH:mm CET/CEST`)
 and returns `true` only when the bulletin's own date is at or after `expectedAfter`.
 Fail-open when no timestamp is found avoids infinite retries if the page layout changes.
-`parse` strips HTML then slices the plain text between consecutive area headings.
+`parse` strips HTML via Jsoup then slices the plain text between consecutive area headings.
 
 ## Tradeoffs
 
-- HTML parsing uses Jsoup, which correctly handles entity decoding, whitespace
-  normalisation, and malformed markup. The bulletin text is extracted via `Document.text()`
-  and then split on area headings.
 - Area coordinates are approximate centre-points; sub-area precision is not required
   for subscriber matching at the current level of granularity.
