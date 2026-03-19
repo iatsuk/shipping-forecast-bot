@@ -129,3 +129,66 @@ HSQLDB embedded file mode was chosen because:
 - `subscribe()` is idempotent: duplicate inserts are silently absorbed via `DuplicateKeyException`.
 - Integration tests use HSQLDB in-memory mode (`EmbeddedDatabaseBuilder`) to avoid touching
   the file-backed database and to keep tests fast and isolated.
+
+---
+
+## Overview
+Scheduled fetching of forecast page content with persistent caching per provider URL.
+
+## Problem
+Forecast pages are published on fixed schedules. The bot needs to automatically retrieve
+the latest page content when a new forecast is due and make it available without re-fetching
+on every request. Only the most recent content per provider is relevant.
+
+## Decision
+Introduce a `ForecastScheduler` that runs once per UTC minute (Spring `@Scheduled` cron),
+checks each registered `ForecastProvider` against the current minute, and fetches the URL
+when a match is found. Fetched content is stored via `ForecastCacheRepository`; saving
+replaces any previously stored entry for the same URL.
+
+A `Clock` dependency is injected into the scheduler to keep it fully unit-testable without
+real-time coupling.
+
+## Structure
+
+- `ForecastCache` — immutable record `(url, content, fetchedAt)`
+- `ForecastCacheRepository` — interface; `save` (upsert) and `findByUrl`
+- `JdbcForecastCacheRepository` — JDBC implementation backed by the `forecast_cache` table;
+  upsert via update-then-insert (single writer, no concurrency concern)
+- `ForecastFetcher` — interface; abstracts HTTP retrieval from scheduling logic
+- `HttpForecastFetcher` — implementation using `java.net.http.HttpClient` (no extra dependency)
+- `ForecastScheduler` — Spring `@Component`; cron-driven, depends on all of the above plus
+  `java.time.Clock` for testability
+
+## Applied Principles / Patterns
+
+- **SOLID — Dependency Inversion**: `ForecastScheduler` depends on `ForecastFetcher` and
+  `ForecastCacheRepository` interfaces, not concrete HTTP or JDBC classes
+- **SOLID — Open-Closed**: adding a new provider requires only a new `ForecastProvider` bean;
+  the scheduler picks it up automatically
+- **GRASP — Protected Variations**: `ForecastFetcher` shields the scheduler from HTTP details;
+  `ForecastCacheRepository` shields it from storage details
+- **GoF — Strategy**: `ForecastFetcher` is interchangeable; test doubles substitute freely
+
+## Why This Approach
+
+Spring scheduling (`@EnableScheduling` + `@Scheduled`) was chosen over a manual
+`ScheduledExecutorService` because it integrates with the existing Spring context, requires
+no extra dependency, and is declarative. A cron expression (`0 * * * * *`) fires at the
+exact top of each minute, matching the minute-level granularity of `ForecastProvider.updateTimes()`.
+
+Deduplication is done by comparing the cached `fetched_at` timestamp (truncated to minutes)
+against the current minute, so a restart mid-minute does not re-fetch content already stored.
+
+## Tradeoffs
+
+- HSQLDB's `CLOB` column stores full page HTML; very large pages (> a few MB) are unusual
+  for forecast sites but worth monitoring.
+- The scheduler uses wall-clock minutes; if the system clock is adjusted backwards, a
+  provider could be skipped for a minute.
+
+## Notes
+
+- `forecast_cache` DDL is in `schema.sql` alongside `user_subscription`, applied at startup.
+- No `ForecastProvider` implementations exist yet; the scheduler silently does nothing until
+  at least one is registered as a Spring bean.

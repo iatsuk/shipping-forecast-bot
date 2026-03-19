@@ -10,11 +10,14 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 
 import javax.sql.DataSource;
+import java.time.Clock;
 
 @Configuration
+@EnableScheduling
 @PropertySource("classpath:application.properties")
 @ComponentScan("boats.log.shippingforecast")
 public class AppConfig {
@@ -48,5 +51,10 @@ public class AppConfig {
     @Bean
     public JdbcTemplate jdbcTemplate(DataSource dataSource) {
         return new JdbcTemplate(dataSource);
+    }
+
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
     }
 }
