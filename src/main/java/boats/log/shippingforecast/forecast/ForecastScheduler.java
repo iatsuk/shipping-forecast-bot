@@ -4,81 +4,174 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalTime;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+import java.util.random.RandomGenerator;
 
 /**
- * Checks each registered {@link ForecastProvider} once per minute. When the current
- * UTC minute matches one of a provider's declared update times — and the provider has
- * not already been fetched during that minute — the page is retrieved and persisted
- * via {@link ForecastCacheRepository}, replacing any previously stored content.
+ * Checks each registered {@link ForecastProvider} once per minute and fetches its page
+ * when new content is due. Three behaviours are built in:
+ *
+ * <ul>
+ *   <li><b>Catch-up window</b>: instead of matching only the exact scheduled minute, the
+ *       scheduler fetches any time within {@value #CATCH_UP_WINDOW_MINUTES} minutes after
+ *       the jitter-adjusted fetch time, provided the cache still predates the last scheduled
+ *       update. This recovers gracefully from brief application downtime.</li>
+ *
+ *   <li><b>Freshness retry</b>: after a successful HTTP fetch the provider is asked whether
+ *       the content is actually new via {@link ForecastProvider#isFresh}. Providers with
+ *       up-to-three-hour publication delays may return stale HTML even after their declared
+ *       update time. When that happens the cache is left unchanged and a retry is scheduled
+ *       {@value #MIN_RETRY_MINUTES}–{@value #MAX_RETRY_MINUTES} minutes later.</li>
+ *
+ *   <li><b>Request jitter</b>: a random offset of {@value #MIN_JITTER_SECONDS}–{@value
+ *       #MAX_JITTER_SECONDS} seconds is added to each provider's fetch time at startup.
+ *       This avoids the obvious pattern of requests landing on round-clock minutes (00, 05,
+ *       10 …), reducing the risk of the application being identified as a bot.</li>
+ * </ul>
  */
 @Component
 public class ForecastScheduler {
 
     private static final Logger log = Logger.getLogger(ForecastScheduler.class.getName());
 
+    private static final int CATCH_UP_WINDOW_MINUTES = 30;
+    private static final int MIN_JITTER_SECONDS = 120; // 2 minutes
+    private static final int MAX_JITTER_SECONDS = 240; // 4 minutes
+    private static final int MIN_RETRY_MINUTES = 15;
+    private static final int MAX_RETRY_MINUTES = 30;
+
     private final List<ForecastProvider> providers;
     private final ForecastFetcher fetcher;
     private final ForecastCacheRepository cacheRepository;
     private final Clock clock;
+    private final RandomGenerator random;
+
+    /** Fixed per-provider jitter computed once at startup. */
+    private final Map<String, Duration> fetchJitters;
+
+    /**
+     * Tracks URLs that returned stale content and the earliest instant at which a retry
+     * should be attempted.
+     */
+    private final Map<String, Instant> pendingRetries = new ConcurrentHashMap<>();
 
     public ForecastScheduler(
             List<ForecastProvider> providers,
             ForecastFetcher fetcher,
             ForecastCacheRepository cacheRepository,
-            Clock clock
+            Clock clock,
+            RandomGenerator random
     ) {
         this.providers = providers;
         this.fetcher = fetcher;
         this.cacheRepository = cacheRepository;
         this.clock = clock;
+        this.random = random;
+        this.fetchJitters = computeJitters(providers, random);
     }
 
     @Scheduled(cron = "0 * * * * *")
     public void checkAndFetch() {
-        LocalTime currentMinute = LocalTime.now(clock).truncatedTo(ChronoUnit.MINUTES);
+        Instant now = Instant.now(clock);
         for (ForecastProvider provider : providers) {
-            if (isDueForUpdate(provider, currentMinute)) {
-                fetchAndCache(provider, currentMinute);
+            if (isDueForFetch(provider, now)) {
+                fetchAndCache(provider, now);
             }
         }
     }
 
-    private boolean isDueForUpdate(ForecastProvider provider, LocalTime currentMinute) {
-        return provider.updateTimes().stream()
-                .map(t -> t.truncatedTo(ChronoUnit.MINUTES))
-                .anyMatch(currentMinute::equals);
+    private boolean isDueForFetch(ForecastProvider provider, Instant now) {
+        Instant retryAt = pendingRetries.get(provider.url());
+        if (retryAt != null) {
+            // While a retry is pending, suppress normal schedule checks entirely.
+            // Without this, the catch-up window would re-trigger every minute,
+            // hammering the provider until the retry window closes.
+            return !now.isBefore(retryAt);
+        }
+        return isScheduledUpdateDue(provider, now);
     }
 
-    private void fetchAndCache(ForecastProvider provider, LocalTime currentMinute) {
-        if (alreadyFetchedThisMinute(provider.url(), currentMinute)) {
-            return;
-        }
+    /**
+     * Returns true when the current instant falls inside the catch-up window for any of
+     * the provider's declared update times, and the cache predates that update.
+     *
+     * <p>The window starts at {@code updateTime + jitter} and extends for
+     * {@value #CATCH_UP_WINDOW_MINUTES} minutes, giving the application time to recover
+     * after a brief outage without waiting for the next scheduled update.
+     */
+    private boolean isScheduledUpdateDue(ForecastProvider provider, Instant now) {
+        Duration jitter = fetchJitters.get(provider.url());
+        return provider.updateTimes().stream().anyMatch(updateTime -> {
+            Instant lastUpdate = mostRecentOccurrenceOf(updateTime, now);
+            Instant jitteredFetch = lastUpdate.plus(jitter);
+            boolean inWindow = !now.isBefore(jitteredFetch)
+                    && now.isBefore(jitteredFetch.plus(CATCH_UP_WINDOW_MINUTES, ChronoUnit.MINUTES));
+            return inWindow && cacheIsOlderThan(provider.url(), lastUpdate);
+        });
+    }
+
+    private void fetchAndCache(ForecastProvider provider, Instant now) {
         try {
             String content = fetcher.fetch(provider.url());
-            cacheRepository.save(provider.url(), content, Instant.now(clock));
+            Instant lastUpdate = lastScheduledUpdateBefore(provider, now);
+
+            if (!provider.isFresh(content, lastUpdate)) {
+                // Content has not been updated yet. Schedule a retry rather than caching stale data.
+                Duration delay = randomRetryDelay();
+                pendingRetries.put(provider.url(), now.plus(delay));
+                log.info("Stale content from " + provider.url() + "; retrying in " + delay.toMinutes() + " min");
+                return;
+            }
+
+            pendingRetries.remove(provider.url());
+            cacheRepository.save(provider.url(), content, now);
             log.info("Cached forecast from: " + provider.url());
         } catch (IOException e) {
             log.warning("Failed to fetch forecast from " + provider.url() + ": " + e.getMessage());
         }
     }
 
-    private boolean alreadyFetchedThisMinute(String url, LocalTime currentMinute) {
-        Optional<ForecastCache> cached = cacheRepository.findByUrl(url);
-        if (cached.isEmpty()) {
-            return false;
+    /**
+     * Returns the most recent instant at which {@code time} occurred relative to {@code now}.
+     * If today's occurrence is still in the future, returns yesterday's occurrence instead.
+     */
+    private Instant mostRecentOccurrenceOf(LocalTime time, Instant now) {
+        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
+        Instant todayOccurrence = today.atTime(time).toInstant(ZoneOffset.UTC);
+        return now.isBefore(todayOccurrence)
+                ? todayOccurrence.minus(1, ChronoUnit.DAYS)
+                : todayOccurrence;
+    }
+
+    private boolean cacheIsOlderThan(String url, Instant threshold) {
+        return cacheRepository.findByUrl(url)
+                .map(cache -> cache.fetchedAt().isBefore(threshold))
+                .orElse(true);
+    }
+
+    /** Returns the most recent scheduled update instant across all of the provider's update times. */
+    private Instant lastScheduledUpdateBefore(ForecastProvider provider, Instant now) {
+        return provider.updateTimes().stream()
+                .map(t -> mostRecentOccurrenceOf(t, now))
+                .max(Instant::compareTo)
+                .orElse(now);
+    }
+
+    private Duration randomRetryDelay() {
+        int minutes = random.nextInt(MAX_RETRY_MINUTES - MIN_RETRY_MINUTES + 1) + MIN_RETRY_MINUTES;
+        return Duration.ofMinutes(minutes);
+    }
+
+    private static Map<String, Duration> computeJitters(List<ForecastProvider> providers, RandomGenerator random) {
+        Map<String, Duration> jitters = new HashMap<>();
+        for (ForecastProvider provider : providers) {
+            int seconds = random.nextInt(MAX_JITTER_SECONDS - MIN_JITTER_SECONDS + 1) + MIN_JITTER_SECONDS;
+            jitters.put(provider.url(), Duration.ofSeconds(seconds));
         }
-        LocalTime cachedMinute = cached.get().fetchedAt()
-                .atZone(ZoneOffset.UTC)
-                .toLocalTime()
-                .truncatedTo(ChronoUnit.MINUTES);
-        return cachedMinute.equals(currentMinute);
+        return Map.copyOf(jitters);
     }
 }

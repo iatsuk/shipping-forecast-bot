@@ -136,29 +136,50 @@ HSQLDB embedded file mode was chosen because:
 Scheduled fetching of forecast page content with persistent caching per provider URL.
 
 ## Problem
-Forecast pages are published on fixed schedules. The bot needs to automatically retrieve
-the latest page content when a new forecast is due and make it available without re-fetching
-on every request. Only the most recent content per provider is relevant.
+Three interrelated concerns had to be addressed together:
+
+1. **Missed-minute recovery** — a minute-exact cron check meant that any brief application
+   downtime would skip a scheduled fetch entirely and leave the cache stale until the next
+   update cycle (potentially hours away).
+2. **Provider-side publication delays** — shipping-forecast providers sometimes publish their
+   declared update time but serve content that is still from the previous cycle (delays up
+   to three hours are common). Caching stale content is worse than not caching at all.
+3. **Bot-pattern detection** — requests landing on round clock minutes (00, 05, 10 …) are
+   a strong signal that the client is automated. Public forecast sites may rate-limit or
+   block such traffic.
 
 ## Decision
-Introduce a `ForecastScheduler` that runs once per UTC minute (Spring `@Scheduled` cron),
-checks each registered `ForecastProvider` against the current minute, and fetches the URL
-when a match is found. Fetched content is stored via `ForecastCacheRepository`; saving
-replaces any previously stored entry for the same URL.
+Three complementary mechanisms were added to `ForecastScheduler`:
 
-A `Clock` dependency is injected into the scheduler to keep it fully unit-testable without
-real-time coupling.
+**Catch-up window**: instead of matching only the exact scheduled minute, the scheduler
+fetches whenever the current time falls inside a 30-minute window starting at
+`updateTime + jitter`. If the cache already contains content fetched after the last
+scheduled update, the window check is skipped (no duplicate fetch).
+
+**Freshness retry**: after a successful HTTP fetch, `ForecastProvider.isFresh(content,
+expectedAfter)` is called. If the provider reports stale content, the cache is left
+unchanged and a retry is scheduled 15–30 minutes later. While a retry is pending, the
+normal catch-up window check is suppressed so the server is not hit on every minute tick.
+
+**Per-provider jitter**: a fixed random offset of 2–4 minutes is computed for each
+provider at scheduler startup. Fetch times therefore never land on round minutes, and
+different providers fetch at slightly different offsets.
+
+Both `Clock` and `Random` are injected dependencies so all three behaviours are fully
+exercisable in unit tests without real time or real randomness.
 
 ## Structure
 
 - `ForecastCache` — immutable record `(url, content, fetchedAt)`
 - `ForecastCacheRepository` — interface; `save` (upsert) and `findByUrl`
-- `JdbcForecastCacheRepository` — JDBC implementation backed by the `forecast_cache` table;
-  upsert via update-then-insert (single writer, no concurrency concern)
+- `JdbcForecastCacheRepository` — JDBC implementation backed by the `forecast_cache` table
 - `ForecastFetcher` — interface; abstracts HTTP retrieval from scheduling logic
-- `HttpForecastFetcher` — implementation using `java.net.http.HttpClient` (no extra dependency)
-- `ForecastScheduler` — Spring `@Component`; cron-driven, depends on all of the above plus
-  `java.time.Clock` for testability
+- `HttpForecastFetcher` — implementation using `java.net.http.HttpClient`
+- `ForecastProvider.isFresh(content, expectedAfter)` — default method (returns `true`);
+  override in providers that embed a publication timestamp in the page
+- `ForecastScheduler` — Spring `@Component`; cron-driven (`0 * * * * *`), holds a
+  `Map<url, Duration> fetchJitters` (computed at startup) and a
+  `ConcurrentHashMap<url, Instant> pendingRetries` (updated at runtime)
 
 ## Applied Principles / Patterns
 
@@ -166,26 +187,34 @@ real-time coupling.
   `ForecastCacheRepository` interfaces, not concrete HTTP or JDBC classes
 - **SOLID — Open-Closed**: adding a new provider requires only a new `ForecastProvider` bean;
   the scheduler picks it up automatically
+- **GRASP — Information Expert**: freshness logic lives in `ForecastProvider`, the only class
+  that knows the page format well enough to detect a stale response
 - **GRASP — Protected Variations**: `ForecastFetcher` shields the scheduler from HTTP details;
   `ForecastCacheRepository` shields it from storage details
 - **GoF — Strategy**: `ForecastFetcher` is interchangeable; test doubles substitute freely
 
 ## Why This Approach
 
-Spring scheduling (`@EnableScheduling` + `@Scheduled`) was chosen over a manual
-`ScheduledExecutorService` because it integrates with the existing Spring context, requires
-no extra dependency, and is declarative. A cron expression (`0 * * * * *`) fires at the
-exact top of each minute, matching the minute-level granularity of `ForecastProvider.updateTimes()`.
+The catch-up window replaces the original minute-equality check with a time-range check
+against `cacheRepository` state. This is more robust than widening the cron expression
+because the cache check acts as the true deduplication barrier — the same fetch will not
+fire twice regardless of how many times the cron fires within the window.
 
-Deduplication is done by comparing the cached `fetched_at` timestamp (truncated to minutes)
-against the current minute, so a restart mid-minute does not re-fetch content already stored.
+Suppressing the normal schedule while a retry is pending prevents the catch-up window from
+becoming a polling loop. Without the suppression, a stale provider would be hit on every
+cron tick for up to 30 minutes.
+
+Jitter is fixed per provider (not re-randomised on each tick) so the offset is stable
+across restarts and the deduplication window calculation remains correct.
 
 ## Tradeoffs
 
-- HSQLDB's `CLOB` column stores full page HTML; very large pages (> a few MB) are unusual
-  for forecast sites but worth monitoring.
-- The scheduler uses wall-clock minutes; if the system clock is adjusted backwards, a
-  provider could be skipped for a minute.
+- `pendingRetries` is in-memory; a restart clears it. On restart the catch-up window
+  re-triggers a fetch immediately, which re-checks freshness, so correctness is preserved
+  — only the retry delay is lost.
+- Jitter is computed from `java.util.Random`, not `SecureRandom`; this is intentional
+  (timing offsets do not require cryptographic quality).
+- `isFresh` receives raw page content as a `String`.
 
 ## Notes
 

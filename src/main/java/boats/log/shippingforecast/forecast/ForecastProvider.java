@@ -1,5 +1,6 @@
 package boats.log.shippingforecast.forecast;
 
+import java.time.Instant;
 import java.time.LocalTime;
 import java.util.List;
 
@@ -34,6 +35,14 @@ public interface ForecastProvider {
      */
     List<GeoLocation> geoLocations();
 
+    /**
+     * Returns true if {@code content} represents a forecast published after {@code expectedAfter}.
+     *
+     * <p>Providers that embed a publication timestamp in their page should override this method
+     * to detect when the upstream page has not yet been refreshed despite the scheduled publication
+     * time having passed.
+     */
+    boolean isFresh(String content, Instant expectedAfter);
     /**
      * Extracts structured forecasts from the raw page content.
      *

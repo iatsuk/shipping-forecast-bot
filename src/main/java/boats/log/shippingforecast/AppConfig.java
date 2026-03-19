@@ -15,6 +15,7 @@ import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 
 import javax.sql.DataSource;
 import java.time.Clock;
+import java.util.random.RandomGenerator;
 
 @Configuration
 @EnableScheduling
@@ -56,5 +57,10 @@ public class AppConfig {
     @Bean
     public Clock clock() {
         return Clock.systemUTC();
+    }
+
+    @Bean
+    public RandomGenerator random() {
+        return RandomGenerator.getDefault();
     }
 }
