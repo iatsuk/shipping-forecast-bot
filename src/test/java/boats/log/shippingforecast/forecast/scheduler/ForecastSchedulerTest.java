@@ -263,6 +263,54 @@ class ForecastSchedulerTest {
         assertThat(cache.savedEntries).isEmpty();
     }
 
+    // --- startup fetch ---
+
+    @Test
+    void fetchOnStartup_fetchesWhenCacheIsEmpty() {
+        LocalTime updateTime = LocalTime.of(6, 0);
+        // The current time is well past the catch-up window — checkAndFetch would skip this.
+        Clock clock = fixedClockAt(LocalDate.of(2024, 1, 1), LocalTime.of(9, 0));
+        RecordingFetcher fetcher = new RecordingFetcher("content");
+        RecordingCacheRepository cache = new RecordingCacheRepository();
+
+        scheduler(clock, fetcher, cache, new StubProvider("https://example.com", List.of(updateTime)))
+                .fetchOnStartup();
+
+        assertThat(fetcher.fetchedUrls).containsExactly("https://example.com");
+        assertThat(cache.savedEntries).hasSize(1);
+    }
+
+    @Test
+    void fetchOnStartup_skipsWhenCacheIsAlreadyFresh() {
+        LocalTime updateTime = LocalTime.of(6, 0);
+        Instant updateInstant = LocalDate.of(2024, 1, 1).atTime(updateTime).toInstant(ZoneOffset.UTC);
+        Instant fetchedAfterUpdate = updateInstant.plusSeconds(30);
+        Clock clock = Clock.fixed(updateInstant.plus(Duration.ofHours(3)), ZoneOffset.UTC);
+        RecordingFetcher fetcher = new RecordingFetcher("content");
+        RecordingCacheRepository cache = new RecordingCacheRepository();
+        cache.preset("https://example.com", "cached", fetchedAfterUpdate);
+
+        scheduler(clock, fetcher, cache, new StubProvider("https://example.com", List.of(updateTime)))
+                .fetchOnStartup();
+
+        assertThat(fetcher.fetchedUrls).isEmpty();
+    }
+
+    @Test
+    void fetchOnStartup_schedulesRetryWhenContentIsStale() {
+        LocalTime updateTime = LocalTime.of(6, 0);
+        Clock clock = fixedClockAt(LocalDate.of(2024, 1, 1), LocalTime.of(9, 0));
+        RecordingFetcher fetcher = new RecordingFetcher("content");
+        RecordingCacheRepository cache = new RecordingCacheRepository();
+
+        scheduler(clock, fetcher, cache, new StubProvider("https://example.com", List.of(updateTime), false))
+                .fetchOnStartup();
+
+        // Fetched but not cached — stale content triggers a retry.
+        assertThat(fetcher.fetchedUrls).containsExactly("https://example.com");
+        assertThat(cache.savedEntries).isEmpty();
+    }
+
     // --- helpers ---
 
     private static Clock fixedClockAt(LocalDate date, LocalTime time) {

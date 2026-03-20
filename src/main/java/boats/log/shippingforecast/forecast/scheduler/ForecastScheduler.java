@@ -3,6 +3,7 @@ package boats.log.shippingforecast.forecast.scheduler;
 import boats.log.shippingforecast.forecast.ForecastCacheRepository;
 import boats.log.shippingforecast.forecast.ForecastFetcher;
 import boats.log.shippingforecast.forecast.ForecastProvider;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -39,7 +40,7 @@ import java.util.random.RandomGenerator;
  * </ul>
  */
 @Component
-public class ForecastScheduler {
+public class ForecastScheduler implements InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(ForecastScheduler.class);
 
@@ -86,6 +87,27 @@ public class ForecastScheduler {
             Duration jitter = fetchJitters.get(provider.url());
             log.info("  Provider '{}': update times {}, jitter +{}s, url: {}",
                     provider.name(), provider.updateTimes(), jitter.toSeconds(), provider.url());
+        }
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        fetchOnStartup();
+    }
+
+    /**
+     * Fetches any provider whose cache is absent or predates the last scheduled update.
+     * This ensures fresh data is available immediately on cold start or after prolonged
+     * downtime, without waiting for the next scheduled catch-up window.
+     */
+    public void fetchOnStartup() {
+        Instant now = Instant.now(clock);
+        for (ForecastProvider provider : providers) {
+            Instant lastUpdate = lastScheduledUpdateBefore(provider, now);
+            if (cacheIsOlderThan(provider.url(), lastUpdate)) {
+                log.info("No fresh cache for '{}' on startup, fetching immediately", provider.name());
+                fetchAndCache(provider, now);
+            }
         }
     }
 
