@@ -19,6 +19,13 @@ public interface BotInteraction extends MessageSender {
     void sendMenu(long chatId, String text, List<List<MenuOption>> rows);
 
     /**
+     * Sends a photo with an optional caption and an attached inline keyboard.
+     *
+     * @param rows each inner list becomes one row of buttons
+     */
+    void sendPhoto(long chatId, byte[] imageData, String caption, List<List<MenuOption>> rows);
+
+    /**
      * Acknowledges a callback query, dismissing the loading indicator on the button.
      * Must be called for every received {@code CallbackQuery}.
      */

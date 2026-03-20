@@ -4,7 +4,8 @@ import boats.log.shippingforecast.forecast.ForecastCache;
 import boats.log.shippingforecast.forecast.ForecastCacheRepository;
 import boats.log.shippingforecast.forecast.ForecastProvider;
 import boats.log.shippingforecast.forecast.GeoLocation;
-import boats.log.shippingforecast.forecast.ShippingForecast;
+import boats.log.shippingforecast.forecast.ImageCache;
+import boats.log.shippingforecast.forecast.ImageCacheRepository;
 import boats.log.shippingforecast.subscription.SubscriptionRepository;
 import boats.log.shippingforecast.user.TelegramUser;
 import boats.log.shippingforecast.user.UserRepository;
@@ -28,8 +29,8 @@ import java.util.Optional;
  * <p>Navigation flow:
  * <ol>
  *   <li>/start → greeting + provider list keyboard</li>
- *   <li>Provider selected → send latest forecasts + area keyboard</li>
- *   <li>Area selected → subscribe user + return to provider list</li>
+ *   <li>Provider selected → send area map image + area keyboard</li>
+ *   <li>Area selected → send forecast for that area + subscribe user + return to provider list</li>
  *   <li>/stop → delete all user data + goodbye</li>
  * </ol>
  */
@@ -42,6 +43,7 @@ class BotCommandHandler {
 
     private final BotInteraction bot;
     private final ForecastCacheRepository cacheRepository;
+    private final ImageCacheRepository imageCacheRepository;
     private final UserRepository userRepository;
     private final SubscriptionRepository subscriptionRepository;
 
@@ -50,22 +52,27 @@ class BotCommandHandler {
     private final List<List<MenuOption>> providerKeyboard;
     private final Map<String, ForecastProvider> providersByName;
     private final Map<String, GeoLocation> geoLocationsByName;
+    /** Maps area name (lowercase) to the provider that covers it — used for area forecast lookup. */
+    private final Map<String, ForecastProvider> providerByAreaName;
 
     BotCommandHandler(
             BotInteraction bot,
             List<ForecastProvider> providers,
             ForecastCacheRepository cacheRepository,
+            ImageCacheRepository imageCacheRepository,
             UserRepository userRepository,
             SubscriptionRepository subscriptionRepository
     ) {
         this.bot = bot;
         this.providers = providers;
         this.cacheRepository = cacheRepository;
+        this.imageCacheRepository = imageCacheRepository;
         this.userRepository = userRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.providerKeyboard = buildProviderKeyboard(providers);
-        this.providersByName = buildProviderMap(providers);
-        this.geoLocationsByName = buildGeoLocationMap(providers);
+        this.providersByName = buildProvidersByNameMap(providers);
+        this.geoLocationsByName = buildGeoLocationsByNameMap(providers);
+        this.providerByAreaName = buildProviderByAreaNameMap(providers);
     }
 
     void handleStart(long chatId, String firstName) {
@@ -100,24 +107,22 @@ class BotCommandHandler {
     }
 
     private void handleProviderSelected(long chatId, ForecastProvider provider) {
-        Optional<ForecastCache> cached = cacheRepository.findByUrl(provider.url());
-        if (cached.isEmpty()) {
-            bot.sendMenu(chatId,
-                    "No forecast available yet for " + provider.name() + ". Please try again later.",
-                    providerKeyboard);
-            return;
-        }
+        List<List<MenuOption>> areaKeyboard = buildAreaKeyboard(provider);
 
-        List<ShippingForecast> forecasts = provider.parse(cached.get().content());
-        bot.send(chatId, "Latest forecast from " + provider.name() + ":");
-        for (ShippingForecast forecast : forecasts) {
-            if (!forecast.text().isBlank()) {
-                bot.send(chatId, forecast.text());
+        // If the provider has a map image, show it with the area keyboard.
+        Optional<String> mapUrl = provider.mapImageUrl();
+        if (mapUrl.isPresent()) {
+            Optional<ImageCache> cachedImage = imageCacheRepository.findByUrl(mapUrl.get());
+            if (cachedImage.isPresent()) {
+                bot.sendPhoto(chatId, cachedImage.get().data(),
+                        "Select an area to subscribe to automatic updates:",
+                        areaKeyboard);
+                return;
             }
         }
 
-        bot.sendMenu(chatId, "Select an area to subscribe to automatic updates:",
-                buildAreaKeyboard(provider));
+        // Fallback when no image is cached: show a plain text menu.
+        bot.sendMenu(chatId, "Select an area to subscribe to automatic updates:", areaKeyboard);
     }
 
     private void handleAreaSelected(long chatId, String areaName) {
@@ -126,6 +131,20 @@ class BotCommandHandler {
             bot.sendMenu(chatId, "Unknown area. Please select from the menu:", providerKeyboard);
             return;
         }
+
+        // Send the current forecast for this specific area before subscribing.
+        ForecastProvider provider = providerByAreaName.get(areaName.toLowerCase(Locale.ROOT));
+        if (provider != null) {
+            Optional<ForecastCache> cached = cacheRepository.findByUrl(provider.url());
+            if (cached.isPresent()) {
+                provider.parse(cached.get().content()).stream()
+                        .filter(f -> f.location().name().equalsIgnoreCase(areaName))
+                        .filter(f -> !f.text().isBlank())
+                        .findFirst()
+                        .ifPresent(f -> bot.send(chatId, f.text()));
+            }
+        }
+
         // Register before subscribing — the FK on user_subscription requires the user to exist.
         userRepository.register(new TelegramUser(chatId));
         subscriptionRepository.subscribe(chatId, location.name());
@@ -160,7 +179,7 @@ class BotCommandHandler {
         return rows;
     }
 
-    private static Map<String, ForecastProvider> buildProviderMap(List<ForecastProvider> providers) {
+    private static Map<String, ForecastProvider> buildProvidersByNameMap(List<ForecastProvider> providers) {
         Map<String, ForecastProvider> map = new HashMap<>();
         for (ForecastProvider p : providers) {
             map.put(p.name().toLowerCase(Locale.ROOT), p);
@@ -168,11 +187,21 @@ class BotCommandHandler {
         return Map.copyOf(map);
     }
 
-    private static Map<String, GeoLocation> buildGeoLocationMap(List<ForecastProvider> providers) {
+    private static Map<String, GeoLocation> buildGeoLocationsByNameMap(List<ForecastProvider> providers) {
         Map<String, GeoLocation> map = new HashMap<>();
         for (ForecastProvider p : providers) {
             for (GeoLocation loc : p.geoLocations()) {
                 map.put(loc.name().toLowerCase(Locale.ROOT), loc);
+            }
+        }
+        return Map.copyOf(map);
+    }
+
+    private static Map<String, ForecastProvider> buildProviderByAreaNameMap(List<ForecastProvider> providers) {
+        Map<String, ForecastProvider> map = new HashMap<>();
+        for (ForecastProvider p : providers) {
+            for (GeoLocation loc : p.geoLocations()) {
+                map.put(loc.name().toLowerCase(Locale.ROOT), p);
             }
         }
         return Map.copyOf(map);

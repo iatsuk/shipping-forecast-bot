@@ -312,8 +312,8 @@ delivery on every forecast cycle and log errors indefinitely for every blocked u
 Introduce `UserBlockedBotException` as a typed signal for permanent delivery failure.
 `TelegramBot.send()` catches `TelegramApiRequestException` with error code 403 and wraps
 it into `UserBlockedBotException` instead of a generic `RuntimeException`. `ForecastDispatcher`
-catches this specific exception and calls `subscriptionRepository.deleteAllByChatId(chatId)`,
-removing all subscriptions for that user so no further deliveries are attempted.
+catches this specific exception and calls `userRepository.delete(chatId)`, which removes the
+`telegram_user` row and lets the `ON DELETE CASCADE` FK remove all subscriptions automatically.
 
 ## Structure
 
@@ -322,7 +322,7 @@ removing all subscriptions for that user so no further deliveries are attempted.
 - `TelegramBot.send()` — distinguishes 403 (`UserBlockedBotException`) from other Telegram
   errors (generic `RuntimeException`)
 - `ForecastDispatcher.dispatch()` — catches `UserBlockedBotException` before the generic
-  `Exception` handler; calls `subscriptionRepository.deleteAllByChatId(chatId)`; continues
+  `Exception` handler; calls `userRepository.delete(chatId)` (subscriptions cascade); continues
   processing remaining subscribers
 
 ## Applied Principles / Patterns
@@ -380,17 +380,19 @@ ignored — navigation is entirely via inline keyboard buttons.
 
 ```
 /start  →  register user  →  greeting + provider list keyboard
-[provider button]  →  send all area forecasts  →  area keyboard
-[area button]  →  subscribe user to area  →  confirmation + provider list keyboard
+[provider button]  →  send provider area map image + area keyboard
+[area button]  →  send current forecast for that area  →  subscribe user  →  provider list keyboard
 /stop  →  delete all user data  →  goodbye message
 ```
 
 ## Structure
 
 - `MenuOption` — record `(label, callbackData)`; the domain model for a keyboard button
-- `BotInteraction` — interface extending `MessageSender`; adds `sendMenu` and `answerCallbackQuery`
+- `BotInteraction` — interface extending `MessageSender`; adds `sendMenu`, `sendPhoto`, and
+  `answerCallbackQuery`
 - `BotCommandHandler` — package-private class; owns all navigation and subscription logic;
-  constructed by `TelegramBot`, not managed by Spring
+  constructed by `TelegramBot`, not managed by Spring; holds a `providerByAreaName` map to
+  look up the provider covering a given area (needed when an area button is pressed)
 - `TelegramBot` — implements `BotInteraction` (Telegram mechanics) and `LongPollingSingleThreadUpdateConsumer`;
   constructs `BotCommandHandler` passing `this`; all domain dependencies are injected by Spring
 
@@ -460,3 +462,65 @@ Fail-open when no timestamp is found avoids infinite retries if the page layout 
 
 - Area coordinates are approximate centre-points; sub-area precision is not required
   for subscriber matching at the current level of granularity.
+
+---
+
+## Provider Map Image Caching
+
+## Problem
+When a user selects a forecast provider, showing a static area map helps them identify
+which geographic areas to subscribe to. The map image must be available immediately at
+interaction time — fetching it on-demand per request would add latency and create a Telegram
+timeout risk. The image is a static asset that does not change between forecast updates.
+
+## Decision
+Extend `ForecastProvider` with an optional `mapImageUrl()` method (default: empty) and
+introduce an `ImageCacheRepository` backed by a new `image_cache` table that stores raw
+binary image data (`LONGVARBINARY`). An `ImageCacheService` (Spring `InitializingBean`)
+fetches and caches images for all providers that supply a map URL on application startup.
+If the image is already cached, no fetch is performed.
+
+`BotCommandHandler.handleProviderSelected` reads the cached image and sends it via
+`BotInteraction.sendPhoto` with the area keyboard attached. If the image is not yet
+cached (first startup, network failure), it falls back to a plain text menu.
+
+## Structure
+
+- `ImageCache` — immutable record `(url, data, fetchedAt)` for a cached binary image
+- `ImageCacheRepository` — interface: `save(url, data, fetchedAt)` and `findByUrl(url)`
+- `JdbcImageCacheRepository` — JDBC implementation backed by the `image_cache` table
+- `ImageCacheService` — `@Component`, `InitializingBean`; iterates providers, fetches
+  map images that are not yet cached using `java.net.http.HttpClient` directly
+- `ForecastProvider.mapImageUrl()` — default method returning `Optional.empty()`;
+  overridden in providers that supply a map image
+- `BotInteraction.sendPhoto(chatId, imageData, caption, rows)` — new method on the
+  interaction interface; implemented in `TelegramBot` using `SendPhoto` + `InputFile`
+
+## Applied Principles / Patterns
+
+- **SOLID — Open-Closed**: adding map images to a new provider requires only overriding
+  `mapImageUrl()` in that provider; no other code changes
+- **SOLID — Dependency Inversion**: `BotCommandHandler` depends on `ImageCacheRepository`
+  (interface), not the JDBC implementation
+- **GRASP — Information Expert**: the provider knows its own map URL; the repository owns
+  storage; the service owns the fetch-and-cache policy
+- **GoF — Template Method (lightweight)**: `InitializingBean.afterPropertiesSet()` provides
+  the startup hook; no subclassing is needed
+
+## Why This Approach
+
+`InitializingBean` gives a clean startup hook without scheduling complexity. Since map images
+are static, a one-time fetch on startup is sufficient. The fallback to a text menu when the
+image is unavailable keeps the bot functional even if the first startup fetch fails.
+
+Storing images in HSQLDB (`LONGVARBINARY`) keeps all persistent state in one place and avoids
+a separate file store or external blob service at the current scale.
+
+## Tradeoffs
+
+- Image data is loaded into memory as a `byte[]` when retrieved from the repository.
+  For large images this is acceptable at the current scale; a streaming approach would be
+  needed for very large assets.
+- Images are never re-fetched after initial caching. If a provider changes its map, the
+  old image persists until the database file is reset manually.
+- `DwdForecastProvider.mapImageUrl()` returns the DWD area map for the North and Baltic Sea.

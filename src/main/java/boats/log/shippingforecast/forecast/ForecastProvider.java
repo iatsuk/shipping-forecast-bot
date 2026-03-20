@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Contract for a shipping forecast data provider.
@@ -45,6 +46,14 @@ public interface ForecastProvider {
      * The list must not be empty and must be consistent with what {@link #parse} returns.
      */
     List<GeoLocation> geoLocations();
+
+    /**
+     * URL of a static map image illustrating the forecast areas covered by this provider.
+     * Returns empty if the provider does not supply a map image.
+     */
+    default Optional<String> mapImageUrl() {
+        return Optional.empty();
+    }
 
     /**
      * Returns true if {@code content} represents a forecast published after {@code expectedAfter}.

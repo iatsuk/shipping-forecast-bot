@@ -17,12 +17,16 @@ boats.log.shippingforecast
 │   ├── ForecastFetcher.java          — interface (HTTP abstraction)
 │   ├── ForecastCacheRepository.java  — interface (persistence abstraction)
 │   ├── ForecastCache.java            — record (url, content, fetchedAt)
+│   ├── ImageCacheRepository.java     — interface (image persistence abstraction)
+│   ├── ImageCache.java               — record (url, data, fetchedAt)
 │   ├── ShippingForecast.java         — record (location, text)
 │   ├── GeoLocation.java              — record (name, latitude, longitude)
 │   │
 │   ├── infra/                        — infrastructure implementations
 │   │   ├── HttpForecastFetcher.java          — java.net.http.HttpClient impl
-│   │   └── JdbcForecastCacheRepository.java  — Spring JdbcTemplate impl
+│   │   ├── JdbcForecastCacheRepository.java  — Spring JdbcTemplate impl
+│   │   └── JdbcImageCacheRepository.java     — Spring JdbcTemplate impl
+│   │   └── ImageCacheService.java            — startup image fetcher (InitializingBean)
 │   │
 │   ├── provider/                     — concrete provider implementations
 │   │   └── DwdForecastProvider.java  — DWD North & Baltic Sea bulletin
@@ -44,7 +48,7 @@ boats.log.shippingforecast
 └── telegram/
     ├── TelegramBot.java              — Telegram long-polling consumer + BotInteraction impl
     ├── BotCommandHandler.java        — all command and menu navigation logic
-    ├── BotInteraction.java           — interface: send + sendMenu + answerCallbackQuery
+    ├── BotInteraction.java           — interface: send + sendMenu + sendPhoto + answerCallbackQuery
     ├── MenuOption.java               — record (label, callbackData) for inline keyboard buttons
     ├── MessageSender.java            — interface for plain text sends (used by ForecastDispatcher)
     └── UserBlockedBotException.java  — signals permanent delivery failure (user blocked bot)
@@ -58,7 +62,7 @@ boats.log.shippingforecast
 - **Connection:** `DriverManagerDataSource` (no pooling; single-connection acceptable for low-traffic bot)
 - **Tests:** use HSQLDB in-memory via `EmbeddedDatabaseBuilder` to keep tests isolated and fast
 
-Three tables:
+Four tables:
 ```sql
 -- telegram_user: one row per known user; chat_id serves as both user identifier and dispatch destination
 CREATE TABLE IF NOT EXISTS telegram_user (
@@ -80,6 +84,14 @@ CREATE TABLE IF NOT EXISTS forecast_cache (
     content    CLOB         NOT NULL,
     fetched_at TIMESTAMP    NOT NULL,
     CONSTRAINT pk_forecast_cache PRIMARY KEY (url)
+);
+
+-- image_cache: one row per image URL; LONGVARBINARY stores raw bytes (e.g. provider area maps)
+CREATE TABLE IF NOT EXISTS image_cache (
+    url        VARCHAR(500)  NOT NULL,
+    data       LONGVARBINARY NOT NULL,
+    fetched_at TIMESTAMP     NOT NULL,
+    CONSTRAINT pk_image_cache PRIMARY KEY (url)
 );
 ```
 
@@ -107,6 +119,9 @@ All are **immutable Java records**:
 ├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
 │ ForecastCache    │ url, content, fetchedAt     │ Latest cached raw HTML for one provider   │
 │                  │                             │ URL                                       │
+├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
+│ ImageCache       │ url, data, fetchedAt        │ Cached binary image for a provider        │
+│                  │                             │ (e.g. area map)                           │
 └──────────────────┴─────────────────────────────┴───────────────────────────────────────────┘
 ```
 
@@ -119,6 +134,7 @@ Key contract methods:
 - `updateTimes()` — `List<LocalTime>` in the provider's local zone
 - `publishingZone()` — defaults to UTC; DWD overrides to Europe/Berlin
 - `geoLocations()` — the areas this provider covers
+- `mapImageUrl()` — optional URL of a static area map image; default returns empty
 - `isFresh(content, expectedAfter)` — detect whether the fetched page is actually new content
 - `parse(pageContent)` — extract one `ShippingForecast` per area from raw HTML
 
@@ -172,8 +188,8 @@ without real time.
 **Interaction flow:**
 ```
 /start  →  register user  →  greeting + provider list (inline keyboard)
-[provider button]  →  send latest forecasts per area  →  area keyboard
-[area button]  →  subscribe user  →  confirmation + return to provider list
+[provider button]  →  send provider area map image + area keyboard
+[area button]  →  send forecast for that area  →  subscribe user  →  provider list
 /stop   →  delete all user data  →  goodbye
 ```
 
@@ -231,6 +247,10 @@ The architecture doc (at the repo root) covers six documented design decisions:
    the handler inside `TelegramBot` with `this` as the interaction target.
 8. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
    existing code were required to add it (Open-Closed).
+9. **Provider map image caching** — `ForecastProvider.mapImageUrl()` optional method;
+   `ImageCacheRepository` + `JdbcImageCacheRepository` for `LONGVARBINARY` storage;
+   `ImageCacheService` (InitializingBean) fetches once at startup; `BotInteraction.sendPhoto`
+   delivers the image with the area keyboard attached.
 
 ## 9. Key Gaps / What Is Not Yet Implemented
 
@@ -238,3 +258,5 @@ The architecture doc (at the repo root) covers six documented design decisions:
   additional providers (BBC, Met Office, etc.).
 - There is no way for a user to view or remove individual subscriptions from within the bot
   (unsubscribe per area). Currently `/stop` removes everything.
+- Provider map images are fetched once at startup and never refreshed. If a provider changes
+  its map image, the old one persists until the database is reset.

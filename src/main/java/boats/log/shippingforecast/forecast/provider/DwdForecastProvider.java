@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Optional;
 import java.util.regex.*;
 
 /**
@@ -23,6 +24,9 @@ public class DwdForecastProvider implements ForecastProvider {
 
     private static final String URL =
             "https://www.dwd.de/EN/ourservices/seewetternordostseeen/seewetternordostsee.html";
+
+    private static final String MAP_IMAGE_URL =
+            "https://www.dwd.de/DE/fachnutzer/schifffahrt/bilder/seewetter_gebiete_001_1000.jpg?__blob=poster";
 
     // Local Berlin times at which DWD issues the bulletin (00:15 and 12:15)
     private static final List<LocalTime> UPDATE_TIMES = List.of(
@@ -90,6 +94,11 @@ public class DwdForecastProvider implements ForecastProvider {
     @Override
     public List<GeoLocation> geoLocations() {
         return GEO_LOCATIONS;
+    }
+
+    @Override
+    public Optional<String> mapImageUrl() {
+        return Optional.of(MAP_IMAGE_URL);
     }
 
     /**

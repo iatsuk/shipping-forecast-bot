@@ -2,6 +2,7 @@ package boats.log.shippingforecast.telegram;
 
 import boats.log.shippingforecast.forecast.ForecastCacheRepository;
 import boats.log.shippingforecast.forecast.ForecastProvider;
+import boats.log.shippingforecast.forecast.ImageCacheRepository;
 import boats.log.shippingforecast.subscription.SubscriptionRepository;
 import boats.log.shippingforecast.user.UserRepository;
 import org.slf4j.Logger;
@@ -11,7 +12,9 @@ import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -21,6 +24,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
+import java.io.ByteArrayInputStream;
 import java.util.List;
 
 /**
@@ -42,12 +46,13 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, BotIn
             @Value("${telegram.bot.token}") String token,
             List<ForecastProvider> providers,
             ForecastCacheRepository cacheRepository,
+            ImageCacheRepository imageCacheRepository,
             UserRepository userRepository,
             SubscriptionRepository subscriptionRepository
     ) {
         this.client = new OkHttpTelegramClient(token);
         this.commandHandler = new BotCommandHandler(
-                this, providers, cacheRepository, userRepository, subscriptionRepository);
+                this, providers, cacheRepository, imageCacheRepository, userRepository, subscriptionRepository);
     }
 
     // --- BotInteraction / MessageSender ---
@@ -80,6 +85,42 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, BotIn
                 .text(text)
                 .replyMarkup(new InlineKeyboardMarkup(keyboardRows))
                 .build(), chatId);
+    }
+
+    @Override
+    public void sendPhoto(long chatId, byte[] imageData, String caption, List<List<MenuOption>> rows) {
+        List<InlineKeyboardRow> keyboardRows = rows.stream()
+                .map(row -> {
+                    InlineKeyboardRow kr = new InlineKeyboardRow();
+                    for (MenuOption opt : row) {
+                        kr.add(InlineKeyboardButton.builder()
+                                .text(opt.label())
+                                .callbackData(opt.callbackData())
+                                .build());
+                    }
+                    return kr;
+                })
+                .toList();
+
+        try {
+            // SendDocument bypasses Telegram's photo dimension limits — the DWD area map
+            // has dimensions that exceed the SendPhoto API's aspect-ratio constraints.
+            client.execute(SendDocument.builder()
+                    .chatId(chatId)
+                    .document(new InputFile(new ByteArrayInputStream(imageData), "map.jpg"))
+                    .caption(caption)
+                    .replyMarkup(new InlineKeyboardMarkup(keyboardRows))
+                    .build());
+        } catch (TelegramApiRequestException e) {
+            if (e.getErrorCode() == 403) {
+                throw new UserBlockedBotException(chatId, e);
+            }
+            log.error("Failed to send photo to chat {}: {}", chatId, e.getMessage(), e);
+            throw new RuntimeException("Telegram send failed for chat " + chatId, e);
+        } catch (TelegramApiException e) {
+            log.error("Failed to send photo to chat {}: {}", chatId, e.getMessage(), e);
+            throw new RuntimeException("Telegram send failed for chat " + chatId, e);
+        }
     }
 
     @Override
