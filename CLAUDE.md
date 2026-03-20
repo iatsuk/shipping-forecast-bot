@@ -178,14 +178,16 @@ Mock only real boundaries, not everything.
 ## Implementation Guidelines for the Agent
 
 When making changes, follow this workflow:
-1. Understand the use case and affected module
-2. Prefer the simplest correct design
-3. Refactor when needed before adding complexity
-4. Keep responsibilities separated
-5. Add or update tests
-6. Update architecture.md if OOP/design structure changed
-7. Add English comments only for non-obvious parts
-8. Ensure the result builds and tests cleanly
+1. **Read `README.md` first** to understand the current project state before touching any code
+2. Understand the use case and affected module
+3. Prefer the simplest correct design
+4. Refactor when needed before adding complexity
+5. Keep responsibilities separated
+6. Add or update tests
+7. Update `architecture.md` if OOP/design structure changed
+8. Add English comments only for non-obvious parts
+9. Ensure the result builds and tests cleanly
+10. **Update `README.md` last** to reflect any changes to structure, behavior, or design decisions
 
 ---
 
@@ -264,4 +266,15 @@ Any important constraints, invariants, or future considerations.
 
 ### README.md Requirement
 
-The project overview is in README.MD. Update the file corresponding to the current state of the project.
+`README.md` is the authoritative project overview.
+
+**Before making any changes:** read `README.md` to understand the current state — package
+structure, persistence model, key components, and known gaps. Do not rely on memory alone.
+
+**After all changes are complete:** update `README.md` to reflect the new state. This includes:
+- package structure (new or removed files)
+- new or changed components and their responsibilities
+- updated behavior descriptions
+- revised "Key Gaps" section if something was implemented or removed
+
+Keep `README.md` accurate and in sync with the actual code at all times.
