@@ -261,3 +261,7 @@ What complexity or limitations does this design introduce?
 ## Notes
 Any important constraints, invariants, or future considerations.
 ```
+
+### README.md Requirement
+
+Update the project overview in README.md corresonding to the current state of the project.

@@ -1,68 +1,215 @@
-# Shipping Forecast Bot
+# shipping-forecast-bot
 
-## Description
-The main idea of this project is to create a bot that tweets the shipping forecast every day at predefine 
-scheduled time periods. The shipping forecast is weather reports and forecasts for the seas around 
-the coasts. The forecast is produced by the National Met Offices.
+A Telegram bot that fetches, caches, and delivers shipping weather forecasts from external data providers.
+Built with plain Spring (no Boot), Java 25, Maven, HSQLDB, and Spring JDBC.
 
-## Technologies
-- language: 
-- libraries:
-- database:
-- testing:
-- infrastructure:
-- CI/CD:
-- monitoring:
-- logging:
+## 1. Package Structure
 
-## Architecture
+Root package: `boats.log.shippingforecast`
 
-The project is mostly stateless and consists of the following components:
-- **TelegramUI Component**: A function that receives Telegram Webhook updates, interacts with users providing them a way to subscribe onto different forecast areas and sends the result to the **storage** function.
-- **Source Components**: A set of independent stateless functions that are started by cron, fetch, and parse the shipping forecast data from different data sources. After that a function triggers the **notifier** function and pass the forecast to it.
-- **Notifier Component**: A stateless function that receives the forecast data from *Sources* and the users' subscriptions to dispatch forecasts using the Telegram REST API. It also tracks users that had blocked the bot and sends their ids to **storage** to delete from the database.
-- **Storage Component**: A function that stores the users' subscriptions and the forecast data. It also deletes users that had blocked the bot.
-
-A [Mermaid](https://www.mermaidchart.com/play) flowchart diagram:
-
-```mermaid
-flowchart TD
-    Cron(["Cron Trigger"]) -- run by predefined schedule --> SourcesComponent["Data Source Functions"]
-    SourcesComponent -- Fetch a Forecast --> Internet["Internet pages"]
-    SourcesComponent -- Send a parsed Forecast --> NotifierComponent["Notifier Function"]
-    NotifierComponent -- Get Users' subscriptions --> StorageComponent["Storage Function"]
-    NotifierComponent -- Send Users for deletion --> StorageComponent
-    NotifierComponent -- Send Personalized Forecast --> TelegramAPI(["Telegram API"])
-    StorageComponent -- Read Users subscriptions --> DB["Database"]
-    StorageComponent -- Store Users subscriptions --> DB
-    StorageComponent -- Delete Users subscriptions --> DB
-    TelegramUIComponent["Telegram UI Function"] -- Get an User subscriptions --> StorageComponent
-    TelegramUIComponent -- Add a subscription to an User --> StorageComponent
-    TelegramUIComponent -- Send answer to a user --> TelegramAPI
-    TelegramAPI -- Trigger via a WebHook --> TelegramUIComponent
-
-    SourcesComponent@{ shape: procs}
-    Internet@{ shape: docs}
-    DB@{ shape: db}
+```
+boats.log.shippingforecast
+├── App.java                          — main entry point
+├── AppConfig.java                    — Spring @Configuration (all beans wired here)
+│
+├── forecast/                         — domain contracts + domain records
+│   ├── ForecastProvider.java         — interface (Strategy)
+│   ├── ForecastFetcher.java          — interface (HTTP abstraction)
+│   ├── ForecastCacheRepository.java  — interface (persistence abstraction)
+│   ├── ForecastCache.java            — record (url, content, fetchedAt)
+│   ├── ShippingForecast.java         — record (location, text)
+│   ├── GeoLocation.java              — record (name, latitude, longitude)
+│   │
+│   ├── infra/                        — infrastructure implementations
+│   │   ├── HttpForecastFetcher.java          — java.net.http.HttpClient impl
+│   │   └── JdbcForecastCacheRepository.java  — Spring JdbcTemplate impl
+│   │
+│   ├── provider/                     — concrete provider implementations
+│   │   └── DwdForecastProvider.java  — DWD North & Baltic Sea bulletin
+│   │
+│   └── scheduler/
+│       └── ForecastScheduler.java    — cron-driven orchestrator
+│
+├── user/                             — user domain
+│   ├── TelegramUser.java             — record (chatId)
+│   ├── UserRepository.java           — interface
+│   └── JdbcUserRepository.java       — JDBC implementation
+│
+├── subscription/                     — subscription domain
+│   ├── UserSubscription.java         — record (chatId, area)
+│   ├── SubscriptionRepository.java   — interface
+│   └── JdbcSubscriptionRepository.java — JDBC implementation
+│
+└── telegram/
+    └── TelegramBot.java              — Telegram long-polling consumer
 ```
 
-### Data Sources
-Supported data sources:
+## 2. Persistence
 
-| Provider                   | Type    | Area                 | Link                                                                                               |
-|----------------------------|---------|----------------------|----------------------------------------------------------------------------------------------------|
-| The Deutscher Wetterdienst | Marine  | North and Baltic Sea | [dwd.de](https://www.dwd.de/EN/ourservices/seewetternordostseeen/seewetternordostsee.html)         |
-| The Deutscher Wetterdienst | Coastal | North and Baltic Sea | [dwd.de](https://www.dwd.de/EN/ourservices/kuestenseewetterberichten/kuestenseewetterbericht.html) |
+- **Database:** HSQLDB in file mode, stored at `./data/sfb-db`
+- **Access layer:** Spring `JdbcTemplate` — no JPA/Hibernate
+- **Schema:** applied at startup via `ResourceDatabasePopulator` + `schema.sql` (idempotent `IF NOT EXISTS`)
+- **Connection:** `DriverManagerDataSource` (no pooling; single-connection acceptable for low-traffic bot)
+- **Tests:** use HSQLDB in-memory via `EmbeddedDatabaseBuilder` to keep tests isolated and fast
 
-## How to run the project
+Three tables:
+```sql
+-- telegram_user: one row per known user; chat_id serves as both user identifier and dispatch destination
+CREATE TABLE IF NOT EXISTS telegram_user (
+    chat_id BIGINT NOT NULL,
+    CONSTRAINT pk_telegram_user PRIMARY KEY (chat_id)
+);
 
-## How to run the tests
+-- user_subscription: (chat_id, area), FK to telegram_user with cascade delete
+CREATE TABLE IF NOT EXISTS user_subscription (
+    chat_id BIGINT       NOT NULL,
+    area    VARCHAR(100) NOT NULL,
+    CONSTRAINT pk_user_subscription PRIMARY KEY (chat_id, area),
+    CONSTRAINT fk_user_subscription_user FOREIGN KEY (chat_id) REFERENCES telegram_user(chat_id) ON DELETE CASCADE
+);
 
-## How to deploy the project
+-- forecast_cache: one row per provider URL; CLOB stores raw HTML
+CREATE TABLE IF NOT EXISTS forecast_cache (
+    url        VARCHAR(500) NOT NULL,
+    content    CLOB         NOT NULL,
+    fetched_at TIMESTAMP    NOT NULL,
+    CONSTRAINT pk_forecast_cache PRIMARY KEY (url)
+);
+```
 
-## How to monitor the project
+The bot operates exclusively in private chats, so `chat_id` is both the Telegram user identifier
+and the chat destination for message dispatch — no separate column is needed.
 
-## How to log the project
+A user must be registered in `telegram_user` before they can subscribe. The FK with
+`ON DELETE CASCADE` ensures subscriptions are automatically removed if a user is deleted.
 
-## How to contribute to the project
+## 3. Domain Models
 
+All are **immutable Java records**:
+```
+┌──────────────────┬─────────────────────────────┬───────────────────────────────────────────┐
+│      Record      │           Fields            │                   Role                    │
+├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
+│ TelegramUser     │ chatId                      │ A user known to the bot                   │
+├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
+│ UserSubscription │ chatId, area                │ A user subscribed to a named forecast area│
+├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
+│ GeoLocation      │ name, latitude, longitude   │ A named WGS-84 point for a sea area       │
+├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
+│ ShippingForecast │ location (GeoLocation),     │ One parsed forecast for one area          │
+│                  │ text                        │                                           │
+├──────────────────┼─────────────────────────────┼───────────────────────────────────────────┤
+│ ForecastCache    │ url, content, fetchedAt     │ Latest cached raw HTML for one provider   │
+│                  │                             │ URL                                       │
+└──────────────────┴─────────────────────────────┴───────────────────────────────────────────┘
+```
+
+## 4. ForecastProvider Interface (Strategy Pattern)
+
+`./src/main/java/boats/log/shippingforecast/forecast/ForecastProvider.java`
+
+Key contract methods:
+- `name()`, `description()`, `url()` — metadata
+- `updateTimes()` — `List<LocalTime>` in the provider's local zone
+- `publishingZone()` — defaults to UTC; DWD overrides to Europe/Berlin
+- `geoLocations()` — the areas this provider covers
+- `isFresh(content, expectedAfter)` — detect whether the fetched page is actually new content
+- `parse(pageContent)` — extract one `ShippingForecast` per area from raw HTML
+
+Currently one concrete implementation: `DwdForecastProvider` — covers 9 North/Baltic Sea
+areas (Southwestern North Sea, German Bight, Fischer, Skagerrak, Kattegat, Belts and
+Sound, Western Baltic, Southern Baltic, Southeastern Baltic), publishes at 00:15 and
+12:15 Berlin time, parses the HTML timestamp to detect staleness (CET/CEST aware), uses
+Jsoup for HTML-to-text conversion.
+
+## 5. ForecastScheduler
+
+`./src/main/java/boats/log/shippingforecast/forecast/scheduler/ForecastScheduler.java`
+
+Cron: `0 * * * * *` (every minute). Three key behaviors:
+
+- **Startup fetch** (`afterPropertiesSet` → `fetchOnStartup`): fetches any provider whose cache
+predates the last scheduled update, so data is immediately available on cold start.
+- **Catch-up window:** instead of requiring an exact minute match, fetches if the current time
+is within 30 minutes of updateTime + jitter and cache is stale.
+- **Freshness retry:** if `isFresh()` returns false, leaves the cache unchanged and schedules
+a retry 15–30 minutes later. Normal schedule checks are suppressed while a retry is
+pending.
+- **Per-provider jitter:** a fixed random offset of 120–240 seconds computed once at
+startup. Prevents round-minute request patterns.
+
+`Clock` and `RandomGenerator` are injected, making the scheduler fully unit-testable
+without real time.
+
+## 6. Telegram Bot Integration
+
+`./src/main/java/boats/log/shippingforecast/telegram/TelegramBot.java`
+
+- Library: `telegrambots-longpolling` + `telegrambots-client` version 9.5.0
+- Transport: `OkHttpTelegramClient`
+- Bot registered in `AppConfig` via `TelegramBotsLongPollingApplication`
+- Token injected from `application.properties` via `@Value`
+- Currently, implements a simple echo bot: receives text messages and echoes them back,
+logs location shares but does not act on them
+- `UserRepository` and `SubscriptionRepository` are **not yet wired into** `TelegramBot` —
+the domain and persistence layer is in place but not yet connected to command handling
+
+## 7. pom.xml Dependencies
+
+```
+┌──────────────────────────┬───────────────┬────────────────────────────────────────────┐
+│        Dependency        │    Version    │                  Purpose                   │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ spring-context           │ 7.0.6         │ Spring IoC, scheduling (@EnableScheduling) │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ spring-jdbc              │ 7.0.6         │ JdbcTemplate, EmbeddedDatabaseBuilder      │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ hsqldb                   │ 2.7.4         │ Embedded file-backed database              │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ telegrambots-longpolling │ 9.5.0         │ Long-polling Telegram bot framework        │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ telegrambots-client      │ 9.5.0         │ Telegram API client (OkHttp)               │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ jsoup                    │ 1.22.1        │ HTML parsing for DWD provider              │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ slf4j-api                │ 2.0.17        │ Logging facade                             │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ logback-classic          │ 1.5.32        │ Logging implementation                     │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ junit-jupiter-api        │ via BOM 6.0.3 │ Test framework                             │
+├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
+│ assertj-core             │ 3.27.7        │ Fluent test assertions                     │
+└──────────────────────────┴───────────────┴────────────────────────────────────────────┘
+```
+
+Java target: 25. No Lombok, no Hibernate, no Spring Boot.
+
+## 8. architecture.md Summary
+
+The architecture doc (at the repo root) covers five documented design decisions:
+
+1. **Forecast package structure** — split into `forecast` (contracts), `forecast.infra` (HTTP +
+JDBC), `forecast.provider` (concrete parsers), `forecast.scheduler` (orchestration).
+Dependency flows inward only.
+2. **ForecastProvider abstraction** — Strategy interface; each provider is self-contained;
+records for value objects.
+3. **User registration and subscription persistence** — separate `telegram_user` and
+`user_subscription` tables with a FK. `UserRepository` handles user registration;
+`SubscriptionRepository` handles area subscriptions. `chat_id` doubles as the user
+identifier since the bot operates exclusively in private chats.
+4. **Scheduled forecast fetching** — catch-up window + freshness retry + per-provider
+jitter. `Clock` and `RandomGenerator` are injectable for full test control.
+5. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
+existing code were required to add it (Open-Closed).
+
+## 9. Key Gaps / What Is Not Yet Implemented
+
+- `TelegramBot.consume()` only echoes text — subscription commands (`/subscribe`,
+`/unsubscribe`, `/forecast`) are **not yet implemented**.
+- `UserRepository` and `SubscriptionRepository` exist and are tested but are not yet
+injected into `TelegramBot`.
+- Parsed `ShippingForecast` results are fetched and cached but are **never dispatched** to
+subscribers — the forecast dispatch pipeline (cache → parse → find subscribers → send
+Telegram message) is missing.
+- Only one `ForecastProvider` (`DwdForecastProvider`) exists; the interface is ready for
+additional providers (BBC, Met Office, etc.).
