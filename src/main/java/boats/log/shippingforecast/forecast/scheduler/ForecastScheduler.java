@@ -53,6 +53,7 @@ public class ForecastScheduler implements InitializingBean {
     private final List<ForecastProvider> providers;
     private final ForecastFetcher fetcher;
     private final ForecastCacheRepository cacheRepository;
+    private final ForecastDispatcher dispatcher;
     private final Clock clock;
     private final RandomGenerator random;
 
@@ -69,12 +70,14 @@ public class ForecastScheduler implements InitializingBean {
             List<ForecastProvider> providers,
             ForecastFetcher fetcher,
             ForecastCacheRepository cacheRepository,
+            ForecastDispatcher dispatcher,
             Clock clock,
             RandomGenerator random
     ) {
         this.providers = providers;
         this.fetcher = fetcher;
         this.cacheRepository = cacheRepository;
+        this.dispatcher = dispatcher;
         this.clock = clock;
         this.random = random;
         this.fetchJitters = computeJitters(providers, random);
@@ -168,6 +171,7 @@ public class ForecastScheduler implements InitializingBean {
             pendingRetries.remove(provider.url());
             cacheRepository.save(provider.url(), content, now);
             log.info("Cached forecast from: {}", provider.url());
+            dispatcher.dispatch(provider.parse(content));
         } catch (IOException e) {
             log.warn("Failed to fetch forecast from {}: {}", provider.url(), e.getMessage());
         }

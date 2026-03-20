@@ -12,7 +12,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 @Component
-public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
+public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, MessageSender {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramBot.class);
 
@@ -20,6 +20,20 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
 
     public TelegramBot(@Value("${telegram.bot.token}") String token) {
         this.client = new OkHttpTelegramClient(token);
+    }
+
+    @Override
+    public void send(long chatId, String text) {
+        SendMessage message = SendMessage.builder()
+                .chatId(chatId)
+                .text(text)
+                .build();
+        try {
+            client.execute(message);
+        } catch (TelegramApiException e) {
+            log.error("Failed to send message to chat {}: {}", chatId, e.getMessage(), e);
+            throw new RuntimeException("Telegram send failed for chat " + chatId, e);
+        }
     }
 
     @Override
@@ -31,14 +45,10 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
                 String text = update.getMessage().getText();
                 log.info("Message from user {}: '{}'", userId, text);
 
-                SendMessage message = SendMessage.builder()
-                        .chatId(chatId)
-                        .text(text)
-                        .build();
                 try {
-                    client.execute(message);
-                } catch (TelegramApiException e) {
-                    log.error("Failed to send message to chat {}: {}", chatId, e.getMessage(), e);
+                    send(chatId, text);
+                } catch (RuntimeException e) {
+                    log.error("Failed to echo message to chat {}: {}", chatId, e.getMessage());
                 }
             }
             if (update.getMessage().hasLocation()) {

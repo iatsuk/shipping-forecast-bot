@@ -157,7 +157,7 @@ Three interrelated concerns had to be addressed together:
 2. **Provider-side publication delays** — shipping-forecast providers sometimes publish their
    declared update time but serve content that is still from the previous cycle (delays up
    to three hours are common). Caching stale content is worse than not caching at all.
-3. **Bot-pattern detection** — requests landing on round clock minutes (00, 05, 10 …) are
+3. **Bot-pattern detection** — requests landing on round-clock minutes (00, 05, 10 …) are
    a strong signal that the client is automated. Public forecast sites may rate-limit or
    block such traffic.
 
@@ -237,6 +237,67 @@ across restarts and the deduplication window calculation remains correct.
 ## Notes
 
 - `forecast_cache` DDL is in `schema.sql` alongside `user_subscription`, applied at startup.
+
+---
+
+## Forecast Dispatch Pipeline
+
+## Problem
+After a fresh forecast is fetched and cached, subscribed users must receive the relevant
+area forecasts via Telegram. The dispatch logic needs to coordinate three concerns:
+- parsing the fetched page content into structured forecasts (provider responsibility)
+- looking up subscribers per area (subscription repository)
+- delivering messages to each chat (Telegram messaging)
+
+Embedding this logic directly in `ForecastScheduler` would violate Single Responsibility
+and make the scheduler harder to test.
+
+## Decision
+Introduce a `ForecastDispatcher` in `forecast.scheduler` and a `MessageSender` interface
+in `telegram`. The scheduler calls `dispatcher.dispatch(provider.parse(content))` immediately
+after a successful cache save. The dispatcher iterates the forecasts, looks up subscribers
+per area, and delegates delivery to `MessageSender`. `TelegramBot` implements `MessageSender`.
+
+## Structure
+
+- `MessageSender` (interface, `telegram` package) — single method `send(chatId, text)`;
+  shields dispatch logic from the Telegram client
+- `ForecastDispatcher` (`forecast.scheduler` package) — depends on `SubscriptionRepository`
+  and `MessageSender`; loops over forecasts, queries subscribers by area name, delivers
+  messages; individual failures are caught and logged without aborting remaining sends
+- `TelegramBot` — implements `MessageSender` alongside `LongPollingSingleThreadUpdateConsumer`
+- `ForecastScheduler` — after `cacheRepository.save(...)`, calls
+  `dispatcher.dispatch(provider.parse(content))`
+
+## Applied Principles / Patterns
+
+- **SOLID — Single Responsibility**: `ForecastDispatcher` handles dispatch only;
+  `ForecastScheduler` handles scheduling only
+- **SOLID — Dependency Inversion**: `ForecastDispatcher` depends on `MessageSender`
+  (interface), not on `TelegramBot` (concrete class)
+- **SOLID — Open-Closed**: swapping the messaging backend requires only a new
+  `MessageSender` implementation
+- **GRASP — Low Coupling**: `ForecastDispatcher` has no knowledge of Telegram internals
+- **GRASP — Protected Variations**: `MessageSender` isolates the rest of the application
+  from Telegram API details and failure modes
+
+## Why This Approach
+
+Separating dispatch from scheduling makes both classes independently testable: the scheduler
+tests use a no-op dispatcher; the dispatcher tests use an in-memory `MessageSender` stub.
+Catching exceptions per-message ensures that a Telegram delivery failure for one subscriber
+does not block the remaining subscribers.
+
+Dispatch happens after the cache save so that, even if dispatch fails entirely, the cache
+is updated and subscribers can retrieve the forecast on their next manual request.
+
+## Tradeoffs
+
+- Dispatch is synchronous and happens inside the scheduler's cron tick. For a large
+  subscriber base this could delay the next scheduled check. Acceptable at the current scale;
+  async dispatch can be introduced later if needed.
+- Area matching is by name string (`forecast.location().name()` vs. subscription's area).
+  Both sides must use the same naming convention; mismatches will silently produce no sends.
 
 ---
 

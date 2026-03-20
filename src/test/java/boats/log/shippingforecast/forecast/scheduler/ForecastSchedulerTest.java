@@ -124,7 +124,7 @@ class ForecastSchedulerTest {
                         new StubProvider("https://a.com", List.of(updateTime)),
                         new StubProvider("https://b.com", List.of(updateTime))
                 ),
-                fetcher, cache, clock, ZERO_RANDOM
+                fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM
         );
 
         scheduler.checkAndFetch();
@@ -144,7 +144,7 @@ class ForecastSchedulerTest {
         RecordingFetcher fetcher = new RecordingFetcher("content");
         RecordingCacheRepository cache = new RecordingCacheRepository();
         StubProvider staleProvider = new StubProvider("https://example.com", List.of(updateTime), false);
-        ForecastScheduler scheduler = new ForecastScheduler(List.of(staleProvider), fetcher, cache, clock, ZERO_RANDOM);
+        ForecastScheduler scheduler = new ForecastScheduler(List.of(staleProvider), fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM);
 
         // First tick: fetches, gets stale content — retry scheduled 15 min later.
         scheduler.checkAndFetch();
@@ -175,7 +175,7 @@ class ForecastSchedulerTest {
         // First attempt: stale
         ForecastScheduler scheduler = new ForecastScheduler(
                 List.of(new StubProvider("https://example.com", List.of(updateTime), false)),
-                fetcher, cache, clock, ZERO_RANDOM
+                fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM
         );
         scheduler.checkAndFetch();
         assertThat(fetcher.fetchedUrls).hasSize(1);
@@ -185,7 +185,7 @@ class ForecastSchedulerTest {
         // Switch to a fresh provider (fresh content now available).
         ForecastScheduler retryScheduler = new ForecastScheduler(
                 List.of(new StubProvider("https://example.com", List.of(updateTime), true)),
-                fetcher, cache, Clock.fixed(retryTime, ZoneOffset.UTC), ZERO_RANDOM
+                fetcher, cache, noOpDispatcher(), Clock.fixed(retryTime, ZoneOffset.UTC), ZERO_RANDOM
         );
         // Cache still empty → normal schedule window also fires, simulating the retry scenario.
         retryScheduler.checkAndFetch();
@@ -210,7 +210,7 @@ class ForecastSchedulerTest {
         StubProvider freshProvider = new StubProvider("https://example.com", List.of(updateTime), true);
 
         ForecastScheduler staleScheduler = new ForecastScheduler(
-                List.of(staleProvider), fetcher, cache, clock, ZERO_RANDOM
+                List.of(staleProvider), fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM
         );
         staleScheduler.checkAndFetch();
         assertThat(cache.savedEntries).isEmpty();
@@ -218,7 +218,7 @@ class ForecastSchedulerTest {
         // Advance to retry time with fresh content available.
         clock.set(Clock.fixed(retryTime, ZoneOffset.UTC));
         ForecastScheduler freshScheduler = new ForecastScheduler(
-                List.of(freshProvider), fetcher, cache, clock, ZERO_RANDOM
+                List.of(freshProvider), fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM
         );
         freshScheduler.checkAndFetch();
 
@@ -243,7 +243,7 @@ class ForecastSchedulerTest {
         RecordingCacheRepository cache = new RecordingCacheRepository();
         StubProvider alwaysStaleProvider = new StubProvider("https://example.com", List.of(updateTime), false);
         ForecastScheduler scheduler = new ForecastScheduler(
-                List.of(alwaysStaleProvider), fetcher, cache, clock, ZERO_RANDOM
+                List.of(alwaysStaleProvider), fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM
         );
 
         // First fetch: stale → retry at firstFetch + 15 min.
@@ -320,7 +320,19 @@ class ForecastSchedulerTest {
     private static ForecastScheduler scheduler(Clock clock, ForecastFetcher fetcher,
                                                ForecastCacheRepository cache,
                                                ForecastProvider... providers) {
-        return new ForecastScheduler(List.of(providers), fetcher, cache, clock, ZERO_RANDOM);
+        return new ForecastScheduler(List.of(providers), fetcher, cache, noOpDispatcher(), clock, ZERO_RANDOM);
+    }
+
+    private static ForecastDispatcher noOpDispatcher() {
+        return new ForecastDispatcher(new NoOpSubscriptionRepository(), (chatId, text) -> {});
+    }
+
+    private static class NoOpSubscriptionRepository implements boats.log.shippingforecast.subscription.SubscriptionRepository {
+        @Override public void subscribe(long chatId, String area) {}
+        @Override public void unsubscribe(long chatId, String area) {}
+        @Override public List<String> findAreasByChatId(long chatId) { return List.of(); }
+        @Override public List<Long> findChatIdsByArea(String area) { return List.of(); }
+        @Override public void deleteAllByChatId(long chatId) {}
     }
 
     // --- test doubles ---

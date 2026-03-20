@@ -264,4 +264,4 @@ Any important constraints, invariants, or future considerations.
 
 ### README.md Requirement
 
-Update the project overview in README.md corresonding to the current state of the project.
+The project overview is in README.MD. Update the file corresponding to the current state of the project.

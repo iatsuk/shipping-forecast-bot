@@ -28,7 +28,8 @@ boats.log.shippingforecast
 │   │   └── DwdForecastProvider.java  — DWD North & Baltic Sea bulletin
 │   │
 │   └── scheduler/
-│       └── ForecastScheduler.java    — cron-driven orchestrator
+│       ├── ForecastScheduler.java    — cron-driven orchestrator
+│       └── ForecastDispatcher.java   — dispatches fresh forecasts to subscribers
 │
 ├── user/                             — user domain
 │   ├── TelegramUser.java             — record (chatId)
@@ -41,7 +42,8 @@ boats.log.shippingforecast
 │   └── JdbcSubscriptionRepository.java — JDBC implementation
 │
 └── telegram/
-    └── TelegramBot.java              — Telegram long-polling consumer
+    ├── TelegramBot.java              — Telegram long-polling consumer + MessageSender impl
+    └── MessageSender.java            — interface (send abstraction)
 ```
 
 ## 2. Persistence
@@ -122,37 +124,43 @@ Sound, Western Baltic, Southern Baltic, Southeastern Baltic), publishes at 00:15
 12:15 Berlin time, parses the HTML timestamp to detect staleness (CET/CEST aware), uses
 Jsoup for HTML-to-text conversion.
 
-## 5. ForecastScheduler
+## 5. ForecastScheduler + ForecastDispatcher
 
-`./src/main/java/boats/log/shippingforecast/forecast/scheduler/ForecastScheduler.java`
+`./src/main/java/boats/log/shippingforecast/forecast/scheduler/`
 
-Cron: `0 * * * * *` (every minute). Three key behaviors:
+**ForecastScheduler** — cron: `0 * * * * *` (every minute). Four key behaviors:
 
 - **Startup fetch** (`afterPropertiesSet` → `fetchOnStartup`): fetches any provider whose cache
-predates the last scheduled update, so data is immediately available on cold start.
+  predates the last scheduled update, so data is immediately available on cold start.
 - **Catch-up window:** instead of requiring an exact minute match, fetches if the current time
-is within 30 minutes of updateTime + jitter and cache is stale.
+  is within 30 minutes of `updateTime + jitter` and cache is stale.
 - **Freshness retry:** if `isFresh()` returns false, leaves the cache unchanged and schedules
-a retry 15–30 minutes later. Normal schedule checks are suppressed while a retry is
-pending.
-- **Per-provider jitter:** a fixed random offset of 120–240 seconds computed once at
-startup. Prevents round-minute request patterns.
+  a retry 15–30 minutes later. Normal schedule checks are suppressed while a retry is pending.
+- **Per-provider jitter:** a fixed random offset of 120–240 seconds computed once at startup.
+  Prevents round-minute request patterns.
 
-`Clock` and `RandomGenerator` are injected, making the scheduler fully unit-testable
+After a successful cache save, the scheduler immediately calls `ForecastDispatcher.dispatch()`
+with the parsed forecasts.
+
+**ForecastDispatcher** — for each `ShippingForecast`, looks up all chat IDs subscribed to
+that area via `SubscriptionRepository` and delivers the forecast text via `MessageSender`.
+Individual send failures are caught and logged without aborting the remaining sends.
+
+`Clock` and `RandomGenerator` are injected into the scheduler, making it fully unit-testable
 without real time.
 
 ## 6. Telegram Bot Integration
 
-`./src/main/java/boats/log/shippingforecast/telegram/TelegramBot.java`
+`./src/main/java/boats/log/shippingforecast/telegram/`
 
 - Library: `telegrambots-longpolling` + `telegrambots-client` version 9.5.0
 - Transport: `OkHttpTelegramClient`
 - Bot registered in `AppConfig` via `TelegramBotsLongPollingApplication`
 - Token injected from `application.properties` via `@Value`
-- Currently, implements a simple echo bot: receives text messages and echoes them back,
-logs location shares but does not act on them
-- `UserRepository` and `SubscriptionRepository` are **not yet wired into** `TelegramBot` —
-the domain and persistence layer is in place but not yet connected to command handling
+- `TelegramBot` implements both `LongPollingSingleThreadUpdateConsumer` (receives updates)
+  and `MessageSender` (sends messages); the `MessageSender` interface decouples dispatch logic
+  from the Telegram client
+- Currently handles text messages by echoing them back; logs location shares
 
 ## 7. pom.xml Dependencies
 
@@ -186,30 +194,29 @@ Java target: 25. No Lombok, no Hibernate, no Spring Boot.
 
 ## 8. architecture.md Summary
 
-The architecture doc (at the repo root) covers five documented design decisions:
+The architecture doc (at the repo root) covers six documented design decisions:
 
 1. **Forecast package structure** — split into `forecast` (contracts), `forecast.infra` (HTTP +
-JDBC), `forecast.provider` (concrete parsers), `forecast.scheduler` (orchestration).
-Dependency flows inward only.
+   JDBC), `forecast.provider` (concrete parsers), `forecast.scheduler` (orchestration).
+   Dependency flows inward only.
 2. **ForecastProvider abstraction** — Strategy interface; each provider is self-contained;
-records for value objects.
+   records for value objects.
 3. **User registration and subscription persistence** — separate `telegram_user` and
-`user_subscription` tables with a FK. `UserRepository` handles user registration;
-`SubscriptionRepository` handles area subscriptions. `chat_id` doubles as the user
-identifier since the bot operates exclusively in private chats.
+   `user_subscription` tables with a FK. `UserRepository` handles user registration;
+   `SubscriptionRepository` handles area subscriptions. `chat_id` doubles as the user
+   identifier since the bot operates exclusively in private chats.
 4. **Scheduled forecast fetching** — catch-up window + freshness retry + per-provider
-jitter. `Clock` and `RandomGenerator` are injectable for full test control.
-5. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
-existing code were required to add it (Open-Closed).
+   jitter. `Clock` and `RandomGenerator` are injectable for full test control.
+5. **Forecast dispatch pipeline** — `ForecastDispatcher` + `MessageSender` interface;
+   dispatch is triggered after every successful cache save; per-subscriber failure isolation.
+6. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
+   existing code were required to add it (Open-Closed).
 
 ## 9. Key Gaps / What Is Not Yet Implemented
 
 - `TelegramBot.consume()` only echoes text — subscription commands (`/subscribe`,
-`/unsubscribe`, `/forecast`) are **not yet implemented**.
+  `/unsubscribe`, `/forecast`) are **not yet implemented**.
 - `UserRepository` and `SubscriptionRepository` exist and are tested but are not yet
-injected into `TelegramBot`.
-- Parsed `ShippingForecast` results are fetched and cached but are **never dispatched** to
-subscribers — the forecast dispatch pipeline (cache → parse → find subscribers → send
-Telegram message) is missing.
+  injected into `TelegramBot` for command handling.
 - Only one `ForecastProvider` (`DwdForecastProvider`) exists; the interface is ready for
-additional providers (BBC, Met Office, etc.).
+  additional providers (BBC, Met Office, etc.).
