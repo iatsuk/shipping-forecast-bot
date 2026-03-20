@@ -353,6 +353,83 @@ does not affect delivery to other subscribers.
 
 ---
 
+## Bot Command Handling and Interactive Menu
+
+## Problem
+The bot needs an interactive menu-driven by inline keyboard buttons so users can browse
+providers, read forecasts, and subscribe to areas without typing commands. The routing
+logic and interaction flow must be separated from Telegram API mechanics, and the wiring
+must avoid a circular Spring dependency: `TelegramBot` sends messages, `BotCommandHandler`
+needs to send messages, and `TelegramBot` constructs the handler.
+
+## Decision
+Introduce `BotCommandHandler` as a plain (non-Spring) class constructed directly by
+`TelegramBot`, which passes `this` as the `BotInteraction` dependency. This breaks the
+Spring circular dependency at the wiring level while keeping the classes properly separated.
+
+`BotInteraction` extends `MessageSender` with two additional methods: `sendMenu` (sends a
+message with an attached `InlineKeyboardMarkup`) and `answerCallbackQuery` (acknowledges
+the callback to dismiss the button's loading indicator). A `MenuOption` record carries the
+display label and callback data for each button.
+
+`TelegramBot.consume()` handles two update types: text messages (routed to `handleStart` or
+`handleStop`) and `CallbackQuery` updates (routed to `handleCallback`). All other text is
+ignored — navigation is entirely via inline keyboard buttons.
+
+## Navigation Flow
+
+```
+/start  →  register user  →  greeting + provider list keyboard
+[provider button]  →  send all area forecasts  →  area keyboard
+[area button]  →  subscribe user to area  →  confirmation + provider list keyboard
+/stop  →  delete all user data  →  goodbye message
+```
+
+## Structure
+
+- `MenuOption` — record `(label, callbackData)`; the domain model for a keyboard button
+- `BotInteraction` — interface extending `MessageSender`; adds `sendMenu` and `answerCallbackQuery`
+- `BotCommandHandler` — package-private class; owns all navigation and subscription logic;
+  constructed by `TelegramBot`, not managed by Spring
+- `TelegramBot` — implements `BotInteraction` (Telegram mechanics) and `LongPollingSingleThreadUpdateConsumer`;
+  constructs `BotCommandHandler` passing `this`; all domain dependencies are injected by Spring
+
+Callback data format: `"provider:{name}"` for provider buttons, `"area:{name}"` for area
+buttons. All names are within Telegram's 64-byte callback data limit.
+
+## Applied Principles / Patterns
+
+- **SOLID — Single Responsibility**: `TelegramBot` handles Telegram API mechanics only;
+  `BotCommandHandler` owns all interaction logic
+- **SOLID — Dependency Inversion**: `BotCommandHandler` depends on `BotInteraction`
+  (interface), not on `TelegramBot` (concrete class)
+- **GRASP — Low Coupling / Protected Variations**: `BotInteraction` and `MenuOption` shield
+  command logic from Telegram library types (`InlineKeyboardMarkup`, `InlineKeyboardRow`)
+- **GoF — Strategy**: `ForecastProvider` list is iterated polymorphically; the handler
+  works identically for any number of providers
+
+## Why This Approach
+
+Constructing `BotCommandHandler` inside `TelegramBot` (passing `this`) is the simplest way
+to break the circular dependency without `@Lazy` annotations or an extra factory bean.
+`BotCommandHandler` is package-private because it is an implementation detail of the
+`telegram` package and has no reason to be accessed from outside.
+
+Inline keyboards were chosen over reply keyboards because buttons are attached to specific
+messages (not persistent in the input area), giving a cleaner conversation flow and making
+the navigation intent explicit.
+
+## Tradeoffs
+
+- `BotCommandHandler` is not a Spring bean and therefore not directly unit-testable via
+  Spring context. It is tested indirectly through `TelegramBot`, or can be instantiated
+  directly in a unit test.
+- Callback data uses provider/area names as identifiers. If a provider or area is renamed,
+  existing unacknowledged keyboard buttons in chats will route to the wrong handler entry.
+  Acceptable at the current scale.
+
+---
+
 ## DWD Provider Implementation
 
 ## Decision

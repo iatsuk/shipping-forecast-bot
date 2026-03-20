@@ -42,8 +42,11 @@ boats.log.shippingforecast
 │   └── JdbcSubscriptionRepository.java — JDBC implementation
 │
 └── telegram/
-    ├── TelegramBot.java              — Telegram long-polling consumer + MessageSender impl
-    ├── MessageSender.java            — interface (send abstraction)
+    ├── TelegramBot.java              — Telegram long-polling consumer + BotInteraction impl
+    ├── BotCommandHandler.java        — all command and menu navigation logic
+    ├── BotInteraction.java           — interface: send + sendMenu + answerCallbackQuery
+    ├── MenuOption.java               — record (label, callbackData) for inline keyboard buttons
+    ├── MessageSender.java            — interface for plain text sends (used by ForecastDispatcher)
     └── UserBlockedBotException.java  — signals permanent delivery failure (user blocked bot)
 ```
 
@@ -158,13 +161,21 @@ without real time.
 - Transport: `OkHttpTelegramClient`
 - Bot registered in `AppConfig` via `TelegramBotsLongPollingApplication`
 - Token injected from `application.properties` via `@Value`
-- `TelegramBot` implements both `LongPollingSingleThreadUpdateConsumer` (receives updates)
-  and `MessageSender` (sends messages); the `MessageSender` interface decouples dispatch logic
-  from the Telegram client
-- On Telegram 403 responses (user blocked/stopped the bot, or an account deleted), `send()`
-  throws `UserBlockedBotException`; `ForecastDispatcher` catches it and deletes the user
+- `TelegramBot` implements `LongPollingSingleThreadUpdateConsumer` and `BotInteraction`;
+  it handles Telegram API mechanics only and delegates all logic to `BotCommandHandler`
+- `BotCommandHandler` is a package-private, non-Spring class constructed by `TelegramBot`
+  (passing `this` as `BotInteraction`) — this avoids a circular Spring dependency
+- On Telegram 403 responses (user blocked/stopped/deleted), `send()` throws
+  `UserBlockedBotException`; `ForecastDispatcher` catches it and deletes the user
   from `telegram_user` (subscriptions cascade) so no further delivery is attempted
-- Currently, handles text messages by echoing them back; logs location shares
+
+**Interaction flow:**
+```
+/start  →  register user  →  greeting + provider list (inline keyboard)
+[provider button]  →  send latest forecasts per area  →  area keyboard
+[area button]  →  subscribe user  →  confirmation + return to provider list
+/stop   →  delete all user data  →  goodbye
+```
 
 ## 7. pom.xml Dependencies
 
@@ -213,16 +224,17 @@ The architecture doc (at the repo root) covers six documented design decisions:
    jitter. `Clock` and `RandomGenerator` are injectable for full test control.
 5. **Forecast dispatch pipeline** — `ForecastDispatcher` + `MessageSender` interface;
    dispatch is triggered after every successful cache save; per-subscriber failure isolation.
-6. **Blocked-user detection** — `UserBlockedBotException` on Telegram 403; subscriptions
-   removed immediately so blocked users are never retried.
-7. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
+6. **Blocked-user detection** — `UserBlockedBotException` on Telegram 403; user fully
+   erased so blocked users are never retried.
+7. **Bot command handling and interactive menu** — `BotCommandHandler` + `BotInteraction`
+   interface; inline keyboard navigation; circular Spring dependency avoided by constructing
+   the handler inside `TelegramBot` with `this` as the interaction target.
+8. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
    existing code were required to add it (Open-Closed).
 
 ## 9. Key Gaps / What Is Not Yet Implemented
 
-- `TelegramBot.consume()` only echoes text — subscription commands (`/subscribe`,
-  `/unsubscribe`, `/forecast`) are **not yet implemented**.
-- `UserRepository` and `SubscriptionRepository` exist and are tested but are not yet
-  injected into `TelegramBot` for command handling.
 - Only one `ForecastProvider` (`DwdForecastProvider`) exists; the interface is ready for
   additional providers (BBC, Met Office, etc.).
+- There is no way for a user to view or remove individual subscriptions from within the bot
+  (unsubscribe per area). Currently `/stop` removes everything.
