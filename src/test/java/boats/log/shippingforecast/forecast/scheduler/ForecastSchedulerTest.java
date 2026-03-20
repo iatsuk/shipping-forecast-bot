@@ -324,7 +324,7 @@ class ForecastSchedulerTest {
     }
 
     private static ForecastDispatcher noOpDispatcher() {
-        return new ForecastDispatcher(new NoOpSubscriptionRepository(), (chatId, text) -> {});
+        return new ForecastDispatcher(new NoOpSubscriptionRepository(), new NoOpUserRepository(), (chatId, text) -> {});
     }
 
     private static class NoOpSubscriptionRepository implements boats.log.shippingforecast.subscription.SubscriptionRepository {
@@ -333,6 +333,12 @@ class ForecastSchedulerTest {
         @Override public List<String> findAreasByChatId(long chatId) { return List.of(); }
         @Override public List<Long> findChatIdsByArea(String area) { return List.of(); }
         @Override public void deleteAllByChatId(long chatId) {}
+    }
+
+    private static class NoOpUserRepository implements boats.log.shippingforecast.user.UserRepository {
+        @Override public void register(boats.log.shippingforecast.user.TelegramUser user) {}
+        @Override public java.util.Optional<boats.log.shippingforecast.user.TelegramUser> findById(long chatId) { return java.util.Optional.empty(); }
+        @Override public void delete(long chatId) {}
     }
 
     // --- test doubles ---

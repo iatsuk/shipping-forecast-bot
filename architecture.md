@@ -301,6 +301,58 @@ is updated and subscribers can retrieve the forecast on their next manual reques
 
 ---
 
+## Blocked-User Detection
+
+## Problem
+When a user blocks, stops, or deletes the bot in Telegram, the Telegram API returns HTTP 403
+on any subsequent sent attempt. Without handling this, the application would keep attempting
+delivery on every forecast cycle and log errors indefinitely for every blocked user.
+
+## Decision
+Introduce `UserBlockedBotException` as a typed signal for permanent delivery failure.
+`TelegramBot.send()` catches `TelegramApiRequestException` with error code 403 and wraps
+it into `UserBlockedBotException` instead of a generic `RuntimeException`. `ForecastDispatcher`
+catches this specific exception and calls `subscriptionRepository.deleteAllByChatId(chatId)`,
+removing all subscriptions for that user so no further deliveries are attempted.
+
+## Structure
+
+- `UserBlockedBotException` (`telegram` package) — unchecked exception carrying the `chatId`
+  of the user who blocked the bot; thrown by `TelegramBot.send()` on 403 responses
+- `TelegramBot.send()` — distinguishes 403 (`UserBlockedBotException`) from other Telegram
+  errors (generic `RuntimeException`)
+- `ForecastDispatcher.dispatch()` — catches `UserBlockedBotException` before the generic
+  `Exception` handler; calls `subscriptionRepository.deleteAllByChatId(chatId)`; continues
+  processing remaining subscribers
+
+## Applied Principles / Patterns
+
+- **SOLID — Single Responsibility**: `TelegramBot` owns the knowledge of what constitutes a
+  permanent Telegram failure; `ForecastDispatcher` owns the cleanup policy
+- **GRASP — Protected Variations**: the rest of the application is shielded from Telegram
+  error codes behind a typed exception; changing the detection logic (e.g. adding error 400
+  "user deactivated") requires only a change in `TelegramBot`
+- **Fail fast / explicit design**: a typed exception makes the "blocked" case explicit in code
+  and testable without a real Telegram connection
+
+## Why This Approach
+
+Using a typed exception keeps the `MessageSender` interface clean (no error-code coupling
+in the contract) while still allowing callers to distinguish recoverable from permanent
+failures. The cleanup happens inside the per-subscriber catch block, so one blocked user
+does not affect delivery to other subscribers.
+
+## Tradeoffs
+
+- Only HTTP 403 is treated as a permanent block. "user is deactivated" (deleted account)
+  also arrives as 403 in practice, so it is covered by the same handler. Error 400
+  "chat not found" is treated as a transient error for now.
+- The full `telegram_user` row is deleted (subscriptions cascade). If the user re-enables
+  the bot later, re-registration happens automatically on their first interaction (idempotent
+  `register()` call) and they can subscribe again without any special handling.
+
+---
+
 ## DWD Provider Implementation
 
 ## Decision

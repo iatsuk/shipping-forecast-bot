@@ -43,7 +43,8 @@ boats.log.shippingforecast
 │
 └── telegram/
     ├── TelegramBot.java              — Telegram long-polling consumer + MessageSender impl
-    └── MessageSender.java            — interface (send abstraction)
+    ├── MessageSender.java            — interface (send abstraction)
+    └── UserBlockedBotException.java  — signals permanent delivery failure (user blocked bot)
 ```
 
 ## 2. Persistence
@@ -160,7 +161,10 @@ without real time.
 - `TelegramBot` implements both `LongPollingSingleThreadUpdateConsumer` (receives updates)
   and `MessageSender` (sends messages); the `MessageSender` interface decouples dispatch logic
   from the Telegram client
-- Currently handles text messages by echoing them back; logs location shares
+- On Telegram 403 responses (user blocked/stopped the bot, or an account deleted), `send()`
+  throws `UserBlockedBotException`; `ForecastDispatcher` catches it and deletes the user
+  from `telegram_user` (subscriptions cascade) so no further delivery is attempted
+- Currently, handles text messages by echoing them back; logs location shares
 
 ## 7. pom.xml Dependencies
 
@@ -209,7 +213,9 @@ The architecture doc (at the repo root) covers six documented design decisions:
    jitter. `Clock` and `RandomGenerator` are injectable for full test control.
 5. **Forecast dispatch pipeline** — `ForecastDispatcher` + `MessageSender` interface;
    dispatch is triggered after every successful cache save; per-subscriber failure isolation.
-6. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
+6. **Blocked-user detection** — `UserBlockedBotException` on Telegram 403; subscriptions
+   removed immediately so blocked users are never retried.
+7. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
    existing code were required to add it (Open-Closed).
 
 ## 9. Key Gaps / What Is Not Yet Implemented

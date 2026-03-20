@@ -34,4 +34,9 @@ public class JdbcUserRepository implements UserRepository {
         );
         return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
     }
+
+    @Override
+    public void delete(long chatId) {
+        jdbc.update("DELETE FROM telegram_user WHERE chat_id = ?", chatId);
+    }
 }

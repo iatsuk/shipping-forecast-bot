@@ -11,4 +11,11 @@ public interface UserRepository {
     void register(TelegramUser user);
 
     Optional<TelegramUser> findById(long chatId);
+
+    /**
+     * Deletes the user and all associated data. Subscriptions are removed automatically
+     * via the ON DELETE CASCADE constraint. Called when a user blocks or stops the bot,
+     * or when their Telegram account has been deleted.
+     */
+    void delete(long chatId);
 }

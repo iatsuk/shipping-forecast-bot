@@ -53,4 +53,18 @@ class JdbcUserRepositoryTest {
     void findById_returnsEmptyWhenUserNotFound() {
         assertThat(repository.findById(999L)).isEmpty();
     }
+
+    @Test
+    void delete_removesUser() {
+        repository.register(new TelegramUser(42L));
+
+        repository.delete(42L);
+
+        assertThat(repository.findById(42L)).isEmpty();
+    }
+
+    @Test
+    void delete_isNoOpForUnknownUser() {
+        repository.delete(999L); // must not throw
+    }
 }

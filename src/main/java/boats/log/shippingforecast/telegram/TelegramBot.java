@@ -9,6 +9,7 @@ import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateC
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 @Component
@@ -30,6 +31,13 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
                 .build();
         try {
             client.execute(message);
+        } catch (TelegramApiRequestException e) {
+            // 403 means the user blocked, stopped, or deleted the bot — a permanent condition.
+            if (e.getErrorCode() == 403) {
+                throw new UserBlockedBotException(chatId, e);
+            }
+            log.error("Failed to send message to chat {}: {}", chatId, e.getMessage(), e);
+            throw new RuntimeException("Telegram send failed for chat " + chatId, e);
         } catch (TelegramApiException e) {
             log.error("Failed to send message to chat {}: {}", chatId, e.getMessage(), e);
             throw new RuntimeException("Telegram send failed for chat " + chatId, e);

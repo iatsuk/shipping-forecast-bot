@@ -4,11 +4,15 @@ import boats.log.shippingforecast.forecast.GeoLocation;
 import boats.log.shippingforecast.forecast.ShippingForecast;
 import boats.log.shippingforecast.subscription.SubscriptionRepository;
 import boats.log.shippingforecast.telegram.MessageSender;
+import boats.log.shippingforecast.telegram.UserBlockedBotException;
+import boats.log.shippingforecast.user.TelegramUser;
+import boats.log.shippingforecast.user.UserRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,7 +20,6 @@ class ForecastDispatcherTest {
 
     @Test
     void dispatch_sendsEachForecastToSubscribedChatIds() {
-        // Arrange
         GeoLocation northSea = new GeoLocation("North Sea", 55.0, 5.0);
         GeoLocation baltic = new GeoLocation("Baltic", 58.0, 18.0);
 
@@ -31,13 +34,12 @@ class ForecastDispatcherTest {
         RecordingMessageSender sender = new RecordingMessageSender();
         ForecastDispatcher dispatcher = new ForecastDispatcher(
                 new StubSubscriptionRepository(subscribersByArea),
+                new StubUserRepository(),
                 sender
         );
 
-        // Act
         dispatcher.dispatch(List.of(northSeaForecast, balticForecast));
 
-        // Assert
         assertThat(sender.sent).containsExactlyInAnyOrder(
                 new SentMessage(101L, "North Sea: winds SW 4."),
                 new SentMessage(102L, "North Sea: winds SW 4."),
@@ -53,6 +55,7 @@ class ForecastDispatcherTest {
         RecordingMessageSender sender = new RecordingMessageSender();
         ForecastDispatcher dispatcher = new ForecastDispatcher(
                 new StubSubscriptionRepository(Map.of()),
+                new StubUserRepository(),
                 sender
         );
 
@@ -69,6 +72,7 @@ class ForecastDispatcherTest {
         RecordingMessageSender sender = new RecordingMessageSender();
         ForecastDispatcher dispatcher = new ForecastDispatcher(
                 new StubSubscriptionRepository(Map.of("North Sea", List.of(201L, 202L))),
+                new StubUserRepository(),
                 (chatId, text) -> {
                     if (chatId == 201L) throw new RuntimeException("network error");
                     sender.send(chatId, text);
@@ -77,8 +81,32 @@ class ForecastDispatcherTest {
 
         dispatcher.dispatch(List.of(forecast));
 
-        // Second subscriber still receives the message despite the first failing.
+        // The second subscriber still receives the message despite the first failing.
         assertThat(sender.sent).containsExactly(new SentMessage(202L, "Winds SW 5."));
+    }
+
+    @Test
+    void dispatch_erasesUserWhenBotIsBlockedOrStopped() {
+        GeoLocation area = new GeoLocation("North Sea", 55.0, 5.0);
+        ShippingForecast forecast = new ShippingForecast(area, "Winds SW 5.");
+
+        RecordingMessageSender sender = new RecordingMessageSender();
+        StubUserRepository users = new StubUserRepository();
+        ForecastDispatcher dispatcher = new ForecastDispatcher(
+                new StubSubscriptionRepository(Map.of("North Sea", List.of(301L, 302L))),
+                users,
+                (chatId, text) -> {
+                    if (chatId == 301L) throw new UserBlockedBotException(chatId, null);
+                    sender.send(chatId, text);
+                }
+        );
+
+        dispatcher.dispatch(List.of(forecast));
+
+        // User fully erased (subscriptions cascade from telegram_user deletion).
+        assertThat(users.deletedChatIds).containsExactly(301L);
+        // The remaining subscriber still receives the forecast.
+        assertThat(sender.sent).containsExactly(new SentMessage(302L, "Winds SW 5."));
     }
 
     // --- test doubles ---
@@ -108,5 +136,13 @@ class ForecastDispatcherTest {
             return subscribersByArea.getOrDefault(area, List.of());
         }
         @Override public void deleteAllByChatId(long chatId) {}
+    }
+
+    private static class StubUserRepository implements UserRepository {
+        final List<Long> deletedChatIds = new ArrayList<>();
+
+        @Override public void register(TelegramUser user) {}
+        @Override public Optional<TelegramUser> findById(long chatId) { return Optional.empty(); }
+        @Override public void delete(long chatId) { deletedChatIds.add(chatId); }
     }
 }
