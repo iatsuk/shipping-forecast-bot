@@ -75,60 +75,74 @@ providers share no common implementation — only a common contract. Records are
 
 ---
 
-## Subscription Persistence
+## User Registration and Subscription Persistence
 
 ## Problem
-The bot needs to remember which forecast areas each Telegram chat has subscribed to, and
-to look up all subscribers when dispatching a forecast. This state must survive restarts.
+The bot needs to track which Telegram users have interacted with it and which forecast areas
+each user has subscribed to. Subscriptions must be linked to a known user — a dangling
+subscription referencing a non-existent user would be a data integrity error. Both must
+survive restarts.
 
 ## Decision
-Introduce an embedded HSQLDB file-mode database accessed through Spring JDBC (`JdbcTemplate`).
-The repository pattern is used to isolate persistence details from the rest of the application.
+Introduce two tables: `telegram_user` (user registry) and `user_subscription` (area
+subscriptions), with a foreign key from `user_subscription` to `telegram_user`. The bot
+operates exclusively in private chats, so `chat_id` is both the user identifier and the
+dispatch destination — no separate user-ID column is needed.
+
+The repository pattern is used for both tables to isolate persistence from the rest of the
+application.
 
 ## Structure
 
-- `UserSubscription` — immutable domain record holding `(chatId, area)`
-- `SubscriptionRepository` — interface defining subscription operations (subscribe, unsubscribe,
-  lookup by chat, lookup by area, delete all for a chat)
-- `JdbcSubscriptionRepository` — JDBC implementation, registered as a Spring `@Repository`
-- `schema.sql` — DDL for the `user_subscription` table, applied at startup via
-  `ResourceDatabasePopulator`; uses `IF NOT EXISTS` so it is safe to run on every boot
+- `TelegramUser` — immutable record `(chatId)`; represents a user known to the bot
+- `UserRepository` — interface: `register(user)` (idempotent), `findById(chatId)`
+- `JdbcUserRepository` — JDBC implementation backed by `telegram_user`
+- `UserSubscription` — immutable record `(chatId, area)`
+- `SubscriptionRepository` — interface: subscribe, unsubscribe, lookup by chat, lookup by
+  area, delete all for a chat
+- `JdbcSubscriptionRepository` — JDBC implementation backed by `user_subscription`
+- `schema.sql` — DDL for both tables; `IF NOT EXISTS` makes it safe to run on every boot
 - `AppConfig` — configures `DataSource` (HSQLDB file mode at `./data/sfb-db`) and `JdbcTemplate`
 
 ## Applied Principles / Patterns
 
-- **SOLID — Dependency Inversion**: `TelegramBot` and future services depend on
-  `SubscriptionRepository` (interface), not the JDBC implementation
-- **GRASP — Information Expert**: repository owns all knowledge of how subscriptions are stored
-- **GRASP — Protected Variations**: the interface shields the rest of the app from the choice
-  of embedded HSQLDB; swapping to PostgreSQL later requires only a new implementation
+- **SOLID — Dependency Inversion**: callers depend on `UserRepository` and
+  `SubscriptionRepository` interfaces, not JDBC implementations
+- **SOLID — Single Responsibility**: user registration and subscription management are
+  separate repositories with separate tables and separate concerns
+- **GRASP — Information Expert**: each repository owns all knowledge of how its entity is stored
+- **GRASP — Protected Variations**: interfaces shield the rest of the app from the storage choice;
+  swapping to PostgreSQL requires only new implementations
 
 ## Why This Approach
 
-Spring JDBC with `JdbcTemplate` was chosen over JPA/Hibernate because:
-- The schema is simple (one table, two columns)
-- JPA adds significant startup complexity and classpath weight for no gain here
-- SQL is explicit and easy to reason about for simple CRUD
+Separating `telegram_user` from `user_subscription` enforces referential integrity at the
+database level (`ON DELETE CASCADE`). A user can exist without subscriptions, and a
+subscription cannot exist without a user. Collapsing both into one table would allow orphan
+rows and make user-level operations (e.g. blocking the bot) ambiguous.
 
-HSQLDB embedded file mode was chosen because:
-- No external process to manage
-- Data survives restarts (file-backed, not in-memory)
-- Well-supported by Spring's `EmbeddedDatabaseBuilder` for in-memory testing
+`chat_id` is used as the single identifier because the bot only handles private chats, where
+`chat_id == Telegram user ID`. Using a separate `telegram_id` column would be redundant.
+
+Spring JDBC with `JdbcTemplate` was chosen over JPA/Hibernate because:
+- The schema is simple and stable
+- JPA adds significant startup complexity for no gain here
+- SQL is explicit and easy to reason about for simple CRUD
 
 ## Tradeoffs
 
-- `DriverManagerDataSource` creates a new physical connection per operation (no pooling).
-  Acceptable for a low-throughput Telegram bot; upgrade to HikariCP if connection overhead
-  becomes a concern.
-- HSQLDB file mode is not suitable for multi-process deployments. If the bot is ever
-  scaled horizontally, switch to a networked database and replace `JdbcSubscriptionRepository`.
+- `register()` must be called before `subscribe()` — the FK enforces this. The bot must
+  register the user on every interaction (idempotent) before any subscription operation.
+- `DriverManagerDataSource` has no connection pooling. Acceptable for a low-throughput bot;
+  upgrade to HikariCP if needed.
+- HSQLDB file mode is not suitable for multi-process deployments.
 
 ## Notes
 
-- The database files are created at `./data/sfb-db` relative to the working directory.
-- `subscribe()` is idempotent: duplicate inserts are silently absorbed via `DuplicateKeyException`.
-- Integration tests use HSQLDB in-memory mode (`EmbeddedDatabaseBuilder`) to avoid touching
-  the file-backed database and to keep tests fast and isolated.
+- `register()` and `subscribe()` are both idempotent via `DuplicateKeyException` absorption.
+- Integration tests use HSQLDB in-memory mode to stay fast and isolated from the file-backed DB.
+- `ON DELETE CASCADE` on the FK means deleting a user from `telegram_user` automatically
+  removes all their subscriptions.
 
 ---
 

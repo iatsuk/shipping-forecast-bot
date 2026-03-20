@@ -1,5 +1,7 @@
 package boats.log.shippingforecast.subscription;
 
+import boats.log.shippingforecast.user.JdbcUserRepository;
+import boats.log.shippingforecast.user.TelegramUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,13 +10,12 @@ import org.springframework.jdbc.datasource.embedded.EmbeddedDatabase;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 
-import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class JdbcSubscriptionRepositoryTest {
 
     private EmbeddedDatabase db;
+    private JdbcUserRepository userRepository;
     private JdbcSubscriptionRepository repository;
 
     @BeforeEach
@@ -23,7 +24,9 @@ class JdbcSubscriptionRepositoryTest {
                 .setType(EmbeddedDatabaseType.HSQL)
                 .addScript("schema.sql")
                 .build();
-        repository = new JdbcSubscriptionRepository(new JdbcTemplate(db));
+        JdbcTemplate jdbc = new JdbcTemplate(db);
+        userRepository = new JdbcUserRepository(jdbc);
+        repository = new JdbcSubscriptionRepository(jdbc);
     }
 
     @AfterEach
@@ -33,15 +36,17 @@ class JdbcSubscriptionRepositoryTest {
 
     @Test
     void subscribe_persistsSubscription() {
+        userRepository.register(new TelegramUser(100L));
+
         repository.subscribe(100L, "North Sea");
 
-        List<String> areas = repository.findAreasByChatId(100L);
-
-        assertThat(areas).containsExactly("North Sea");
+        assertThat(repository.findAreasByChatId(100L)).containsExactly("North Sea");
     }
 
     @Test
     void subscribe_isIdempotent() {
+        userRepository.register(new TelegramUser(100L));
+
         repository.subscribe(100L, "North Sea");
         repository.subscribe(100L, "North Sea");
 
@@ -50,7 +55,9 @@ class JdbcSubscriptionRepositoryTest {
 
     @Test
     void unsubscribe_removesSubscription() {
+        userRepository.register(new TelegramUser(100L));
         repository.subscribe(100L, "North Sea");
+
         repository.unsubscribe(100L, "North Sea");
 
         assertThat(repository.findAreasByChatId(100L)).isEmpty();
@@ -58,6 +65,8 @@ class JdbcSubscriptionRepositoryTest {
 
     @Test
     void findAreasByChatId_returnsOnlyAreasForThatChat() {
+        userRepository.register(new TelegramUser(100L));
+        userRepository.register(new TelegramUser(200L));
         repository.subscribe(100L, "North Sea");
         repository.subscribe(100L, "Baltic Sea");
         repository.subscribe(200L, "Irish Sea");
@@ -68,6 +77,9 @@ class JdbcSubscriptionRepositoryTest {
 
     @Test
     void findChatIdsByArea_returnsAllSubscribersOfArea() {
+        userRepository.register(new TelegramUser(100L));
+        userRepository.register(new TelegramUser(200L));
+        userRepository.register(new TelegramUser(300L));
         repository.subscribe(100L, "North Sea");
         repository.subscribe(200L, "North Sea");
         repository.subscribe(300L, "Baltic Sea");
@@ -78,6 +90,8 @@ class JdbcSubscriptionRepositoryTest {
 
     @Test
     void deleteAllByChatId_removesAllSubscriptionsForChat() {
+        userRepository.register(new TelegramUser(100L));
+        userRepository.register(new TelegramUser(200L));
         repository.subscribe(100L, "North Sea");
         repository.subscribe(100L, "Baltic Sea");
         repository.subscribe(200L, "North Sea");
