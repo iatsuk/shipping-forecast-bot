@@ -30,8 +30,8 @@ import java.util.Optional;
  * <ol>
  *   <li>/start → greeting + provider list keyboard</li>
  *   <li>Provider selected → send area map image + area keyboard</li>
- *   <li>Area selected → send latest forecast + offer subscribe/unsubscribe button</li>
- *   <li>Subscribe/Unsubscribe clicked → update subscription + return to provider list</li>
+ *   <li>Area selected → send the latest forecast + offer a subscribe/unsubscribe button</li>
+ *   <li>Subscribe/Unsubscribe clicked → update subscription + return to a provider list</li>
  *   <li>/stop → delete all user data + goodbye</li>
  * </ol>
  */
@@ -43,6 +43,7 @@ class BotCommandHandler {
     private static final String AREA_PREFIX = "area:";
     private static final String SUBSCRIBE_PREFIX = "subscribe:";
     private static final String UNSUBSCRIBE_PREFIX = "unsubscribe:";
+    private static final String MY_SUBSCRIPTIONS = "my_subscriptions";
 
     private static final int LOCATION_SUGGESTIONS = 3;
 
@@ -82,11 +83,20 @@ class BotCommandHandler {
 
     void handleStart(long chatId, String firstName) {
         userRepository.register(new TelegramUser(chatId));
+
+        List<String> subscriptions = subscriptionRepository.findAreasByChatId(chatId);
+
+        List<List<MenuOption>> keyboard = new ArrayList<>();
+        if (!subscriptions.isEmpty()) {
+            keyboard.add(List.of(new MenuOption("Active subscriptions (" + subscriptions.size() + ")", MY_SUBSCRIPTIONS)));
+        }
+        keyboard.addAll(providerKeyboard);
+
         bot.sendMenu(chatId,
                 "Welcome, " + firstName + "! I deliver shipping weather forecasts.\n\n"
                 + "📍 Share your location and I'll suggest the closest forecast areas.\n\n"
                 + "Or select a forecast provider:",
-                providerKeyboard);
+                keyboard);
     }
 
     void handleLocation(long chatId, double latitude, double longitude) {
@@ -141,6 +151,8 @@ class BotCommandHandler {
         } else if (data.startsWith(UNSUBSCRIBE_PREFIX)) {
             String areaName = data.substring(UNSUBSCRIBE_PREFIX.length());
             handleUnsubscribeArea(chatId, areaName);
+        } else if (MY_SUBSCRIPTIONS.equals(data)) {
+            handleMySubscriptions(chatId);
         }
     }
 
@@ -212,6 +224,19 @@ class BotCommandHandler {
                 "Subscribed to " + location.name() + ". You will receive the next forecast automatically.\n\n"
                 + "Select a forecast provider:",
                 providerKeyboard);
+    }
+
+    private void handleMySubscriptions(long chatId) {
+        List<String> subscriptions = subscriptionRepository.findAreasByChatId(chatId);
+        if (subscriptions.isEmpty()) {
+            bot.sendMenu(chatId, "You have no active subscriptions.\n\nSelect a forecast provider:", providerKeyboard);
+            return;
+        }
+
+        List<List<MenuOption>> keyboard = subscriptions.stream()
+                .map(area -> List.of(new MenuOption(area, AREA_PREFIX + area)))
+                .toList();
+        bot.sendMenu(chatId, "Your active subscriptions — tap an area to view the latest forecast or unsubscribe:", keyboard);
     }
 
     private void handleUnsubscribeArea(long chatId, String areaName) {

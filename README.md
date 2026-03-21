@@ -256,7 +256,5 @@ The architecture doc (at the repo root) covers six documented design decisions:
 
 - Only one `ForecastProvider` (`DwdForecastProvider`) exists; the interface is ready for
   additional providers (BBC, Met Office, etc.).
-- There is no way for a user to view or remove individual subscriptions from within the bot
-  (unsubscribe per area). Currently `/stop` removes everything.
 - Provider map images are fetched once at startup and never refreshed. If a provider changes
   its map image, the old one persists until the database is reset.
