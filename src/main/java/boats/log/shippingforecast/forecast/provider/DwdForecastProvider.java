@@ -48,15 +48,15 @@ public class DwdForecastProvider implements ForecastProvider {
     private static final ZoneOffset CEST = ZoneOffset.ofHours(2);
 
     static final List<GeoLocation> GEO_LOCATIONS = List.of(
-            new GeoLocation("Southwestern North Sea",  54.5,  4.0),
-            new GeoLocation("German Bight",            54.5,  7.5),
-            new GeoLocation("Fischer",                 55.5,  5.5),
-            new GeoLocation("Skagerrak",               58.0,  9.5),
-            new GeoLocation("Kattegat",                56.5, 11.5),
-            new GeoLocation("Belts and Sound",         55.5, 10.5),
-            new GeoLocation("Western Baltic",          55.0, 13.0),
-            new GeoLocation("Southern Baltic",         54.5, 17.0),
-            new GeoLocation("Southeastern Baltic",     55.0, 22.0)
+            new GeoLocation("Southwestern North Sea",  52.5,  3.0),
+            new GeoLocation("German Bight",            54.5,  7.0),
+            new GeoLocation("Fischer",                 56.5,  6.0),
+            new GeoLocation("Skagerrak",               58.0, 10.0),
+            new GeoLocation("Kattegat",                56.7, 11.5),
+            new GeoLocation("Belts and Sound",         55.5, 11.0),
+            new GeoLocation("Western Baltic",          54.3, 11.5),
+            new GeoLocation("Southern Baltic",         55.0, 15.0),
+            new GeoLocation("Southeastern Baltic",     55.5, 19.0)
     );
 
     // Area names exactly as they appear in the bulletin (case-insensitive match used in parse)

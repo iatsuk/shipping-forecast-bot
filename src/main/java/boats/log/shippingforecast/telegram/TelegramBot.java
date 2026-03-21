@@ -151,6 +151,14 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, BotIn
             }
         }
 
+        if (update.hasMessage() && update.getMessage().hasLocation()) {
+            long chatId = update.getMessage().getChatId();
+            double lat = update.getMessage().getLocation().getLatitude();
+            double lon = update.getMessage().getLocation().getLongitude();
+            log.info("Location from chat {}: ({}, {})", chatId, lat, lon);
+            commandHandler.handleLocation(chatId, lat, lon);
+        }
+
         if (update.hasCallbackQuery()) {
             CallbackQuery callback = update.getCallbackQuery();
             long chatId = callback.getMessage().getChatId();

@@ -41,6 +41,8 @@ class BotCommandHandler {
     private static final String PROVIDER_PREFIX = "provider:";
     private static final String AREA_PREFIX = "area:";
 
+    private static final int LOCATION_SUGGESTIONS = 3;
+
     private final BotInteraction bot;
     private final ForecastCacheRepository cacheRepository;
     private final ImageCacheRepository imageCacheRepository;
@@ -79,8 +81,35 @@ class BotCommandHandler {
         userRepository.register(new TelegramUser(chatId));
         bot.sendMenu(chatId,
                 "Welcome, " + firstName + "! I deliver shipping weather forecasts.\n\n"
-                + "Select a forecast provider:",
+                + "📍 Share your location and I'll suggest the closest forecast areas.\n\n"
+                + "Or select a forecast provider:",
                 providerKeyboard);
+    }
+
+    void handleLocation(long chatId, double latitude, double longitude) {
+        List<Map.Entry<GeoLocation, Double>> closest = geoLocationsByName.values().stream()
+                .map(loc -> Map.entry(loc, haversineKm(latitude, longitude, loc.latitude(), loc.longitude())))
+                .sorted(Map.Entry.comparingByValue())
+                .limit(LOCATION_SUGGESTIONS)
+                .toList();
+
+        if (closest.isEmpty()) {
+            bot.send(chatId, "No forecast areas available.");
+            return;
+        }
+
+        StringBuilder text = new StringBuilder("Closest forecast areas to your location:\n\n");
+        for (Map.Entry<GeoLocation, Double> entry : closest) {
+            text.append("• ").append(entry.getKey().name())
+                    .append(" — ").append(Math.round(entry.getValue())).append(" km\n");
+        }
+        text.append("\nSelect an area to subscribe:");
+
+        List<List<MenuOption>> keyboard = closest.stream()
+                .map(e -> List.of(new MenuOption(e.getKey().name(), AREA_PREFIX + e.getKey().name())))
+                .toList();
+
+        bot.sendMenu(chatId, text.toString(), keyboard);
     }
 
     void handleStop(long chatId) {
@@ -205,5 +234,16 @@ class BotCommandHandler {
             }
         }
         return Map.copyOf(map);
+    }
+
+    /** Returns the great-circle distance in kilometres between two WGS-84 points. */
+    private static double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+        final double R = 6371.0;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 }
