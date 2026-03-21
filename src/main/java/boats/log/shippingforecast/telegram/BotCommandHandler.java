@@ -30,7 +30,8 @@ import java.util.Optional;
  * <ol>
  *   <li>/start → greeting + provider list keyboard</li>
  *   <li>Provider selected → send area map image + area keyboard</li>
- *   <li>Area selected → send forecast for that area + subscribe user + return to provider list</li>
+ *   <li>Area selected → send latest forecast + offer subscribe/unsubscribe button</li>
+ *   <li>Subscribe/Unsubscribe clicked → update subscription + return to provider list</li>
  *   <li>/stop → delete all user data + goodbye</li>
  * </ol>
  */
@@ -40,6 +41,8 @@ class BotCommandHandler {
 
     private static final String PROVIDER_PREFIX = "provider:";
     private static final String AREA_PREFIX = "area:";
+    private static final String SUBSCRIBE_PREFIX = "subscribe:";
+    private static final String UNSUBSCRIBE_PREFIX = "unsubscribe:";
 
     private static final int LOCATION_SUGGESTIONS = 3;
 
@@ -132,6 +135,12 @@ class BotCommandHandler {
         } else if (data.startsWith(AREA_PREFIX)) {
             String areaName = data.substring(AREA_PREFIX.length());
             handleAreaSelected(chatId, areaName);
+        } else if (data.startsWith(SUBSCRIBE_PREFIX)) {
+            String areaName = data.substring(SUBSCRIBE_PREFIX.length());
+            handleSubscribeArea(chatId, areaName);
+        } else if (data.startsWith(UNSUBSCRIBE_PREFIX)) {
+            String areaName = data.substring(UNSUBSCRIBE_PREFIX.length());
+            handleUnsubscribeArea(chatId, areaName);
         }
     }
 
@@ -162,26 +171,60 @@ class BotCommandHandler {
             return;
         }
 
-        // Send the current forecast for this specific area before subscribing.
+        // Send the latest cached forecast for this area.
         ForecastProvider provider = providerByAreaName.get(areaName.toLowerCase(Locale.ROOT));
         if (provider != null) {
             Optional<ForecastCache> cached = cacheRepository.findByUrl(provider.url());
-            if (cached.isPresent()) {
-                provider.parse(cached.get().content()).stream()
-                        .filter(f -> f.location().name().equalsIgnoreCase(areaName))
-                        .filter(f -> !f.text().isBlank())
-                        .findFirst()
-                        .ifPresent(f -> bot.send(chatId, f.text()));
-            }
+            cached.flatMap(forecastCache -> provider.parse(forecastCache.content()).stream()
+                    .filter(f -> f.location().name().equalsIgnoreCase(areaName))
+                    .filter(f -> !f.text().isBlank())
+                    .findFirst()).ifPresent(f -> bot.send(chatId, f.text()));
         }
 
-        // Register before subscribing — the FK on user_subscription requires the user to exist.
+        // Ensure the user exists before checking subscriptions (FK constraint).
+        userRepository.register(new TelegramUser(chatId));
+
+        boolean isSubscribed = subscriptionRepository.findAreasByChatId(chatId)
+                .stream().anyMatch(a -> a.equalsIgnoreCase(areaName));
+
+        if (isSubscribed) {
+            bot.sendMenu(chatId,
+                    "You are subscribed to " + location.name() + ".",
+                    List.of(List.of(new MenuOption("Unsubscribe from " + location.name(), UNSUBSCRIBE_PREFIX + location.name()))));
+        } else {
+            bot.sendMenu(chatId,
+                    "Subscribe to " + location.name() + " for automatic forecast updates?",
+                    List.of(List.of(new MenuOption("Subscribe to " + location.name(), SUBSCRIBE_PREFIX + location.name()))));
+        }
+    }
+
+    private void handleSubscribeArea(long chatId, String areaName) {
+        GeoLocation location = geoLocationsByName.get(areaName.toLowerCase(Locale.ROOT));
+        if (location == null) {
+            bot.sendMenu(chatId, "Unknown area. Please select from the menu:", providerKeyboard);
+            return;
+        }
+
         userRepository.register(new TelegramUser(chatId));
         subscriptionRepository.subscribe(chatId, location.name());
         log.info("User {} subscribed to area '{}'", chatId, location.name());
         bot.sendMenu(chatId,
                 "Subscribed to " + location.name() + ". You will receive the next forecast automatically.\n\n"
                 + "Select a forecast provider:",
+                providerKeyboard);
+    }
+
+    private void handleUnsubscribeArea(long chatId, String areaName) {
+        GeoLocation location = geoLocationsByName.get(areaName.toLowerCase(Locale.ROOT));
+        if (location == null) {
+            bot.sendMenu(chatId, "Unknown area. Please select from the menu:", providerKeyboard);
+            return;
+        }
+
+        subscriptionRepository.unsubscribe(chatId, location.name());
+        log.info("User {} unsubscribed from area '{}'", chatId, location.name());
+        bot.sendMenu(chatId,
+                "Unsubscribed from " + location.name() + ".\n\nSelect a forecast provider:",
                 providerKeyboard);
     }
 
