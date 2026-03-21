@@ -146,14 +146,23 @@ public class DwdForecastProvider implements ForecastProvider {
                 text = text.substring(0, footerStart);
             }
         }
+        String issuedLine = extractIssuedLine(text);
         List<ShippingForecast> forecasts = new ArrayList<>();
         for (int i = 0; i < AREA_NAMES.size(); i++) {
             String area     = AREA_NAMES.get(i);
             String nextArea = (i + 1 < AREA_NAMES.size()) ? AREA_NAMES.get(i + 1) : null;
             String areaText = extractSection(text, area, nextArea);
+            if (!issuedLine.isEmpty() && !areaText.isEmpty()) {
+                areaText = issuedLine + "\n\n" + areaText;
+            }
             forecasts.add(new ShippingForecast(GEO_LOCATIONS.get(i), areaText));
         }
         return forecasts;
+    }
+
+    private String extractIssuedLine(String text) {
+        Matcher m = TIMESTAMP_PATTERN.matcher(text);
+        return m.find() ? "Issued: " + m.group(1) + ", " + m.group(2) + " " + m.group(3) : "";
     }
 
     private String extractSection(String text, String areaName, String nextAreaName) {

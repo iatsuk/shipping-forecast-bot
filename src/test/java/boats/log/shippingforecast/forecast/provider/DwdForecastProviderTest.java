@@ -126,6 +126,29 @@ class DwdForecastProviderTest {
     }
 
     @Test
+    void parse_prependsIssuedLineToEachArea() {
+        List<ShippingForecast> forecasts = provider.parse(sampleBulletinHtml());
+
+        for (ShippingForecast forecast : forecasts) {
+            if (!forecast.text().isEmpty()) {
+                assertThat(forecast.text()).startsWith("Issued: 19.03.2026, 12:30 CET");
+            }
+        }
+    }
+
+    @Test
+    void parse_doesNotPrependIssuedLineWhenNoTimestamp() {
+        // If the bulletin has no parseable timestamp, the area text is returned as-is.
+        String htmlNoTimestamp = sampleBulletinHtml()
+                .replace("19.03.2026, 12:30 CET", "");
+
+        List<ShippingForecast> forecasts = provider.parse(htmlNoTimestamp);
+
+        assertThat(forecasts.get(0).text()).doesNotContain("Issued:");
+        assertThat(forecasts.get(0).text()).contains("southeasterly");
+    }
+
+    @Test
     void parse_stripsFooterFromLastArea() {
         // The DWD page appends a footer block after the last area that must not bleed into the forecast text.
         String htmlWithFooter = sampleBulletinHtml().replace("</body></html>",
