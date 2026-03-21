@@ -47,6 +47,9 @@ public class DwdForecastProvider implements ForecastProvider {
     private static final ZoneOffset CET  = ZoneOffset.ofHours(1);
     private static final ZoneOffset CEST = ZoneOffset.ofHours(2);
 
+    // Marks the start of the page footer that follows the last forecast area.
+    private static final String FOOTER_SENTINEL = "Marine weather forecast North and Baltic Sea";
+
     static final List<GeoLocation> GEO_LOCATIONS = List.of(
             new GeoLocation("Southwestern North Sea",  52.5,  3.0),
             new GeoLocation("German Bight",            54.5,  7.0),
@@ -133,6 +136,16 @@ public class DwdForecastProvider implements ForecastProvider {
     @Override
     public List<ShippingForecast> parse(String pageContent) {
         String text = Jsoup.parse(pageContent).text();
+        // Trim the footer that follows the last area. The sentinel phrase also appears in the
+        // page header, so we search for it only after the last area heading to avoid a
+        // false-positive that would cut all forecast content.
+        int lastAreaStart = indexOfIgnoreCase(text, AREA_NAMES.get(AREA_NAMES.size() - 1) + ":", 0);
+        if (lastAreaStart >= 0) {
+            int footerStart = indexOfIgnoreCase(text, FOOTER_SENTINEL, lastAreaStart);
+            if (footerStart >= 0) {
+                text = text.substring(0, footerStart);
+            }
+        }
         List<ShippingForecast> forecasts = new ArrayList<>();
         for (int i = 0; i < AREA_NAMES.size(); i++) {
             String area     = AREA_NAMES.get(i);

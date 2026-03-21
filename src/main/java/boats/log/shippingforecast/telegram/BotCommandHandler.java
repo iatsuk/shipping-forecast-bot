@@ -137,21 +137,23 @@ class BotCommandHandler {
 
     private void handleProviderSelected(long chatId, ForecastProvider provider) {
         List<List<MenuOption>> areaKeyboard = buildAreaKeyboard(provider);
+        String caption = provider.name() + "\n"
+                + provider.description() + "\n"
+                + "🔗 " + provider.url() + "\n\n"
+                + "Select an area to subscribe to automatic updates:";
 
         // If the provider has a map image, show it with the area keyboard.
         Optional<String> mapUrl = provider.mapImageUrl();
         if (mapUrl.isPresent()) {
             Optional<ImageCache> cachedImage = imageCacheRepository.findByUrl(mapUrl.get());
             if (cachedImage.isPresent()) {
-                bot.sendPhoto(chatId, cachedImage.get().data(),
-                        "Select an area to subscribe to automatic updates:",
-                        areaKeyboard);
+                bot.sendPhoto(chatId, cachedImage.get().data(), caption, areaKeyboard);
                 return;
             }
         }
 
         // Fallback when no image is cached: show a plain text menu.
-        bot.sendMenu(chatId, "Select an area to subscribe to automatic updates:", areaKeyboard);
+        bot.sendMenu(chatId, caption, areaKeyboard);
     }
 
     private void handleAreaSelected(long chatId, String areaName) {

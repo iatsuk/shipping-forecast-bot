@@ -126,6 +126,22 @@ class DwdForecastProviderTest {
     }
 
     @Test
+    void parse_stripsFooterFromLastArea() {
+        // The DWD page appends a footer block after the last area that must not bleed into the forecast text.
+        String htmlWithFooter = sampleBulletinHtml().replace("</body></html>",
+                "<p>Marine weather forecast North and Baltic Sea "
+                + "Type: Text Area: North and Baltic Sea Update: approx. 00:15 and 12:15</p>"
+                + "</body></html>");
+
+        List<ShippingForecast> forecasts = provider.parse(htmlWithFooter);
+
+        ShippingForecast last = forecasts.get(forecasts.size() - 1);
+        assertThat(last.location().name()).isEqualTo("Southeastern Baltic");
+        assertThat(last.text()).doesNotContain("Marine weather forecast");
+        assertThat(last.text()).doesNotContain("Type: Text");
+    }
+
+    @Test
     void parse_emptyTextForMissingArea() {
         // If the page does not contain a known area heading, the text should be empty (not null)
         String htmlWithoutSkagerrak = sampleBulletinHtml().replace("Skagerrak:", "REMOVED:");
