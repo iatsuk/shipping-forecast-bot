@@ -29,7 +29,8 @@ boats.log.shippingforecast
 │   │   └── ImageCacheService.java            — startup image fetcher (InitializingBean)
 │   │
 │   ├── provider/                     — concrete provider implementations
-│   │   └── DwdForecastProvider.java  — DWD North & Baltic Sea bulletin
+│   │   ├── DwdForecastProvider.java       — DWD North & Baltic Sea bulletin
+│   │   └── MetOfficeForecastProvider.java — UK Met Office Shipping Forecast
 │   │
 │   └── scheduler/
 │       ├── ForecastScheduler.java    — cron-driven orchestrator
@@ -138,11 +139,23 @@ Key contract methods:
 - `isFresh(content, expectedAfter)` — detect whether the fetched page is actually new content
 - `parse(pageContent)` — extract one `ShippingForecast` per area from raw HTML
 
-Currently one concrete implementation: `DwdForecastProvider` — covers 9 North/Baltic Sea
-areas (Southwestern North Sea, German Bight, Fischer, Skagerrak, Kattegat, Belts and
-Sound, Western Baltic, Southern Baltic, Southeastern Baltic), publishes at 00:15 and
-12:15 Berlin time, parses the HTML timestamp to detect staleness (CET/CEST aware), uses
-Jsoup for HTML-to-text conversion.
+Two concrete implementations:
+
+- **`DwdForecastProvider`** — 9 North/Baltic Sea areas (Southwestern North Sea, German Bight,
+  Fischer, Skagerrak, Kattegat, Belts and Sound, Western Baltic, Southern Baltic, Southeastern
+  Baltic); publishes at 00:15 and 12:15 Berlin time; parses the embedded `dd.MM.yyyy, HH:mm
+  CET/CEST` timestamp to detect staleness; uses Jsoup for HTML-to-text conversion.
+
+- **`MetOfficeForecastProvider`** — 31 sea areas around the British Isles; publishes at 0500,
+  1100, 1700, 2300 UTC; the page groups related areas under shared `<h3>` headings (e.g.
+  "Viking, North Utsire") — each individual area is mapped to its own `GeoLocation` and
+  receives the group's forecast text; parses the "Issued by…at HH:mm (UTC)" line for
+  staleness detection; Trafalgar's parenthetical note "(issued 0015 UTC)" is stripped from
+  the heading during parsing.
+
+Both providers prepend their `name()` as the first line of every forecast message so users can
+always tell which source a forecast comes from, even when different providers cover overlapping
+areas (e.g. both DWD and Met Office cover German Bight).
 
 ## 5. ForecastScheduler + ForecastDispatcher
 
@@ -187,11 +200,18 @@ without real time.
 
 **Interaction flow:**
 ```
-/start  →  register user  →  greeting + provider list (inline keyboard)
-[provider button]  →  send provider area map image + area keyboard
-[area button]  →  send forecast for that area  →  subscribe user  →  provider list
+/start  →  register user  →  greeting
+            + optional "Active subscriptions (N)" button  →  subscribed area list
+            + provider list keyboard
+[provider button]   →  send area map image + area keyboard
+[area button]       →  send latest forecast for that area
+                        + "Subscribe to X" OR "Unsubscribe from X" button
+[subscribe button]  →  subscribe user  →  return to provider list
+[unsubscribe button]→  unsubscribe user  →  return to provider list
 /stop   →  delete all user data  →  goodbye
 ```
+
+Callback data prefixes: `provider:`, `area:`, `subscribe:`, `unsubscribe:`, `my_subscriptions`.
 
 ## 7. pom.xml Dependencies
 
@@ -209,7 +229,7 @@ without real time.
 ├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
 │ telegrambots-client      │ 9.5.0         │ Telegram API client (OkHttp)               │
 ├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
-│ jsoup                    │ 1.22.1        │ HTML parsing for DWD provider              │
+│ jsoup                    │ 1.22.1        │ HTML parsing for forecast providers        │
 ├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
 │ slf4j-api                │ 2.0.17        │ Logging facade                             │
 ├──────────────────────────┼───────────────┼────────────────────────────────────────────┤
@@ -245,8 +265,10 @@ The architecture doc (at the repo root) covers six documented design decisions:
 7. **Bot command handling and interactive menu** — `BotCommandHandler` + `BotInteraction`
    interface; inline keyboard navigation; circular Spring dependency avoided by constructing
    the handler inside `TelegramBot` with `this` as the interaction target.
-8. **DWD provider implementation** — first concrete `ForecastProvider`; zero changes to
-   existing code were required to add it (Open-Closed).
+8. **Provider implementations** — `DwdForecastProvider` (DWD North/Baltic Sea) and
+   `MetOfficeForecastProvider` (UK Met Office, 31 areas, grouped `<h3>` headings); each
+   prepends its `name()` to forecast text so overlapping areas (e.g. German Bight) are
+   always attributed to the correct source.
 9. **Provider map image caching** — `ForecastProvider.mapImageUrl()` optional method;
    `ImageCacheRepository` + `JdbcImageCacheRepository` for `LONGVARBINARY` storage;
    `ImageCacheService` (InitializingBean) fetches once at startup; `BotInteraction.sendPhoto`
@@ -254,7 +276,8 @@ The architecture doc (at the repo root) covers six documented design decisions:
 
 ## 9. Key Gaps / What Is Not Yet Implemented
 
-- Only one `ForecastProvider` (`DwdForecastProvider`) exists; the interface is ready for
-  additional providers (BBC, Met Office, etc.).
 - Provider map images are fetched once at startup and never refreshed. If a provider changes
   its map image, the old one persists until the database is reset.
+- The subscription table stores only the area name, not the provider. Two providers that cover
+  an area with the same name (e.g. German Bight) share the same subscription row; a user
+  subscribed to that area will receive forecasts from both providers.

@@ -48,7 +48,7 @@ class DwdForecastProviderTest {
 
     @Test
     void isFresh_returnsTrueWhenPublishedTimestampIsAfterExpected() {
-        // Bulletin issued at 12:30 CET = 11:30 UTC; expected update was at 11:15 UTC
+        // Bulletin issued at 12:30 CET = 11:30 UTC; the expected update was at 11:15 UTC
         String content = bulletinWith("19.03.2026, 12:30 CET");
         Instant expectedAfter = Instant.parse("2026-03-19T11:15:00Z");
 
@@ -131,7 +131,7 @@ class DwdForecastProviderTest {
 
         for (ShippingForecast forecast : forecasts) {
             if (!forecast.text().isEmpty()) {
-                assertThat(forecast.text()).startsWith("Issued: 19.03.2026, 12:30 CET");
+                assertThat(forecast.text()).startsWith("DWD North and Baltic Sea\nIssued: 19.03.2026, 12:30 CET");
             }
         }
     }

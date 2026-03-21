@@ -10,7 +10,7 @@ classes in a single flat namespace, mixing domain contracts with infrastructure 
 **Decision**: Split into sub-packages following the dependency direction rule:
 - `forecast` — domain records and contracts (`GeoLocation`, `ShippingForecast`, `ForecastCache`,
   `ForecastProvider`, `ForecastFetcher`, `ForecastCacheRepository`)
-- `forecast.provider` — provider implementations (`DwdForecastProvider`)
+- `forecast.provider` — provider implementations (`DwdForecastProvider`, `MetOfficeForecastProvider`)
 - `forecast.infra` — infrastructure implementations (`JdbcForecastCacheRepository`, `HttpForecastFetcher`)
 - `forecast.scheduler` — scheduling orchestration (`ForecastScheduler`)
 
@@ -379,11 +379,22 @@ ignored — navigation is entirely via inline keyboard buttons.
 ## Navigation Flow
 
 ```
-/start  →  register user  →  greeting + provider list keyboard
+/start  →  register user  →  greeting
+               + optional "Active subscriptions (N)" button
+               + provider list keyboard
+[Active subscriptions]  →  list of subscribed areas as buttons
 [provider button]  →  send provider area map image + area keyboard
-[area button]  →  send current forecast for that area  →  subscribe user  →  provider list keyboard
+[area button]  →  send latest forecast for that area
+                   + "Subscribe to X" OR "Unsubscribe from X" button (based on current state)
+[subscribe button]  →  subscribe user  →  return to provider list
+[unsubscribe button]  →  unsubscribe user  →  return to provider list
 /stop  →  delete all user data  →  goodbye message
 ```
+
+Callback data prefixes: `provider:` (provider selection), `area:` (area selection / forecast view),
+`subscribe:` (confirm subscription), `unsubscribe:` (confirm unsubscription), `my_subscriptions`
+(view active subscriptions). Subscribing and unsubscribing are now explicit user actions — area
+selection no longer auto-subscribes.
 
 ## Structure
 
@@ -432,36 +443,46 @@ the navigation intent explicit.
 
 ---
 
-## DWD Provider Implementation
+## Forecast Provider Implementations
 
 ## Decision
-Implement `DwdForecastProvider` in `forecast.provider` as the first concrete `ForecastProvider`.
-No new abstractions are needed; the existing contract covers all requirements.
+Each concrete `ForecastProvider` is an `@Component` in `forecast.provider`. Adding a provider
+requires no changes to any existing class — Spring discovers and injects the new bean into the
+scheduler and the bot handler automatically (Open-Closed).
+
+Every provider prepends its `name()` as the first line of every non-empty forecast message.
+This is necessary because different providers may cover areas with identical names (e.g. both
+DWD and Met Office include a German Bight area). Without attribution, users receiving a forecast
+cannot tell which source it came from.
 
 ## Structure
 
-- `DwdForecastProvider` — `@Component`; implements `ForecastProvider` for the DWD
-  North and Baltic Sea bulletin at `dwd.de/…/seewetternordostsee.html`
+- `DwdForecastProvider` — DWD North and Baltic Sea bulletin; 9 areas; publishes at 00:15 and
+  12:15 Berlin time (CET/CEST aware); parses `dd.MM.yyyy, HH:mm CET/CEST` timestamp for
+  freshness; slices plain text (via Jsoup) between consecutive area headings.
+
+- `MetOfficeForecastProvider` — UK Met Office Shipping Forecast; 31 individual sea areas; publishes
+  at 0500, 1100, 1700, 2300 UTC. The page groups related areas under shared `<h3>` headings
+  (e.g. "Viking, North Utsire") with one forecast `<p>` block per group. The provider splits each
+  heading on commas and maps every individual area name to its own `GeoLocation`, sharing the
+  group's forecast text. Trafalgar's heading carries a parenthetical note "(issued 0015 UTC)" that
+  is stripped before area-name matching. Freshness is detected from the "Issued by…at HH:mm (UTC)"
+  line, which is UTC-only (no DST handling needed, `publishingZone()` left at default UTC).
 
 ## Applied Principles / Patterns
 
-- **GRASP — Information Expert**: parsing and freshness logic lives entirely in
-  `DwdForecastProvider`; the scheduler has no knowledge of DWD page structure
-- **SOLID — Open-Closed**: adding this provider required zero changes to existing code
-
-## Why This Approach
-
-`updateTimes` returns 00:15 and 12:15 as local Berlin times; `publishingZone` returns
-`Europe/Berlin` so the scheduler converts them correctly across CET/CEST transitions.
-`isFresh` parses the embedded timestamp (format `dd.MM.yyyy, HH:mm CET/CEST`)
-and returns `true` only when the bulletin's own date is at or after `expectedAfter`.
-Fail-open when no timestamp is found avoids infinite retries if the page layout changes.
-`parse` strips HTML via Jsoup then slices the plain text between consecutive area headings.
+- **GRASP — Information Expert**: parsing, freshness logic, and area coordinates live entirely
+  in each provider; the scheduler and dispatcher have no knowledge of page structure
+- **SOLID — Open-Closed**: adding either provider required zero changes to existing code
 
 ## Tradeoffs
 
-- Area coordinates are approximate centre-points; sub-area precision is not required
-  for subscriber matching at the current level of granularity.
+- Area coordinates are approximate centre-points sufficient for the haversine location
+  suggestions; they are not authoritative maritime boundaries.
+- The subscription table stores only the area name, not the provider. Two providers covering
+  the same area name share the subscription row; users subscribed to that area receive
+  forecasts from both. Provider attribution in the message text (the `name()` prefix) makes
+  this transparent to the user.
 
 ---
 

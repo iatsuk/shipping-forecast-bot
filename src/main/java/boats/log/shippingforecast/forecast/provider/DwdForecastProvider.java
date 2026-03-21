@@ -115,7 +115,7 @@ public class DwdForecastProvider implements ForecastProvider {
      *
      * <p>DWD sometimes serves cached HTML for several minutes after a declared update time.
      * Parsing the timestamp lets the scheduler detect and retry rather than cache stale content.
-     * If no timestamp is found, freshness is assumed (fail-open) so a temporary page change
+     * If no timestamp is found, freshness is assumed (fail-open), so a temporary page change
      * does not cause infinite retries.
      */
     @Override
@@ -144,7 +144,7 @@ public class DwdForecastProvider implements ForecastProvider {
         // Trim the footer that follows the last area. The sentinel phrase also appears in the
         // page header, so we search for it only after the last area heading to avoid a
         // false-positive that would cut all forecast content.
-        int lastAreaStart = indexOfIgnoreCase(text, AREA_NAMES.get(AREA_NAMES.size() - 1) + ":", 0);
+        int lastAreaStart = indexOfIgnoreCase(text, AREA_NAMES.getLast() + ":", 0);
         if (lastAreaStart >= 0) {
             int footerStart = indexOfIgnoreCase(text, FOOTER_SENTINEL, lastAreaStart);
             if (footerStart >= 0) {
@@ -157,8 +157,9 @@ public class DwdForecastProvider implements ForecastProvider {
             String area     = AREA_NAMES.get(i);
             String nextArea = (i + 1 < AREA_NAMES.size()) ? AREA_NAMES.get(i + 1) : null;
             String areaText = extractSection(text, area, nextArea);
-            if (!issuedLine.isEmpty() && !areaText.isEmpty()) {
-                areaText = issuedLine + "\n\n" + areaText;
+            if (!areaText.isEmpty()) {
+                String header = issuedLine.isEmpty() ? name() : name() + "\n" + issuedLine;
+                areaText = header + "\n\n" + areaText;
             }
             forecasts.add(new ShippingForecast(GEO_LOCATIONS.get(i), areaText));
         }

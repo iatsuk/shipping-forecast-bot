@@ -58,8 +58,6 @@ class BotCommandHandler {
     private final List<List<MenuOption>> providerKeyboard;
     private final Map<String, ForecastProvider> providersByName;
     private final Map<String, GeoLocation> geoLocationsByName;
-    /** Maps area name (lowercase) to the provider that covers it — used for area forecast lookup. */
-    private final Map<String, ForecastProvider> providerByAreaName;
 
     BotCommandHandler(
             BotInteraction bot,
@@ -78,7 +76,6 @@ class BotCommandHandler {
         this.providerKeyboard = buildProviderKeyboard(providers);
         this.providersByName = buildProvidersByNameMap(providers);
         this.geoLocationsByName = buildGeoLocationsByNameMap(providers);
-        this.providerByAreaName = buildProviderByAreaNameMap(providers);
     }
 
     void handleStart(long chatId, String firstName) {
@@ -101,7 +98,7 @@ class BotCommandHandler {
 
     void handleLocation(long chatId, double latitude, double longitude) {
         List<Map.Entry<GeoLocation, Double>> closest = geoLocationsByName.values().stream()
-                .map(loc -> Map.entry(loc, haversineKm(latitude, longitude, loc.latitude(), loc.longitude())))
+                .map(loc -> Map.entry(loc, haversineNm(latitude, longitude, loc.latitude(), loc.longitude())))
                 .sorted(Map.Entry.comparingByValue())
                 .limit(LOCATION_SUGGESTIONS)
                 .toList();
@@ -114,7 +111,7 @@ class BotCommandHandler {
         StringBuilder text = new StringBuilder("Closest forecast areas to your location:\n\n");
         for (Map.Entry<GeoLocation, Double> entry : closest) {
             text.append("• ").append(entry.getKey().name())
-                    .append(" — ").append(Math.round(entry.getValue())).append(" km\n");
+                    .append(" — ").append(Math.round(entry.getValue())).append(" nm\n");
         }
         text.append("\nSelect an area to subscribe:");
 
@@ -143,8 +140,18 @@ class BotCommandHandler {
                 handleProviderSelected(chatId, provider);
             }
         } else if (data.startsWith(AREA_PREFIX)) {
-            String areaName = data.substring(AREA_PREFIX.length());
-            handleAreaSelected(chatId, areaName);
+            String rest = data.substring(AREA_PREFIX.length());
+            int slash = rest.indexOf('/');
+            if (slash >= 0) {
+                // Callback from a provider's area keyboard — provider context is known.
+                String providerName = rest.substring(0, slash);
+                String areaName = rest.substring(slash + 1);
+                ForecastProvider provider = providersByName.get(providerName.toLowerCase(Locale.ROOT));
+                handleAreaSelected(chatId, areaName, provider);
+            } else {
+                // Callback from the subscriptions list or location suggestions — no provider context.
+                handleAreaSelected(chatId, rest, null);
+            }
         } else if (data.startsWith(SUBSCRIBE_PREFIX)) {
             String areaName = data.substring(SUBSCRIBE_PREFIX.length());
             handleSubscribeArea(chatId, areaName);
@@ -176,21 +183,28 @@ class BotCommandHandler {
         bot.sendMenu(chatId, caption, areaKeyboard);
     }
 
-    private void handleAreaSelected(long chatId, String areaName) {
+    /**
+     * Shows the latest forecast for {@code areaName} and offers a subscribe/unsubscribe button.
+     *
+     * @param provider the provider whose forecast to show, or {@code null} when the provider is
+     *                 not known (subscriptions list, location suggestions) — in that case all
+     *                 providers covering this area send their forecast
+     */
+    private void handleAreaSelected(long chatId, String areaName, ForecastProvider provider) {
         GeoLocation location = geoLocationsByName.get(areaName.toLowerCase(Locale.ROOT));
         if (location == null) {
             bot.sendMenu(chatId, "Unknown area. Please select from the menu:", providerKeyboard);
             return;
         }
 
-        // Send the latest cached forecast for this area.
-        ForecastProvider provider = providerByAreaName.get(areaName.toLowerCase(Locale.ROOT));
         if (provider != null) {
-            Optional<ForecastCache> cached = cacheRepository.findByUrl(provider.url());
-            cached.flatMap(forecastCache -> provider.parse(forecastCache.content()).stream()
-                    .filter(f -> f.location().name().equalsIgnoreCase(areaName))
-                    .filter(f -> !f.text().isBlank())
-                    .findFirst()).ifPresent(f -> bot.send(chatId, f.text()));
+            sendForecastForArea(chatId, provider, areaName);
+        } else {
+            // No provider context: send it from every provider that covers this area.
+            providers.stream()
+                    .filter(p -> p.geoLocations().stream()
+                            .anyMatch(loc -> loc.name().equalsIgnoreCase(areaName)))
+                    .forEach(p -> sendForecastForArea(chatId, p, areaName));
         }
 
         // Ensure the user exists before checking subscriptions (FK constraint).
@@ -208,6 +222,14 @@ class BotCommandHandler {
                     "Subscribe to " + location.name() + " for automatic forecast updates?",
                     List.of(List.of(new MenuOption("Subscribe to " + location.name(), SUBSCRIBE_PREFIX + location.name()))));
         }
+    }
+
+    private void sendForecastForArea(long chatId, ForecastProvider provider, String areaName) {
+        Optional<ForecastCache> cached = cacheRepository.findByUrl(provider.url());
+        cached.flatMap(forecastCache -> provider.parse(forecastCache.content()).stream()
+                .filter(f -> f.location().name().equalsIgnoreCase(areaName))
+                .filter(f -> !f.text().isBlank())
+                .findFirst()).ifPresent(f -> bot.send(chatId, f.text()));
     }
 
     private void handleSubscribeArea(long chatId, String areaName) {
@@ -264,17 +286,23 @@ class BotCommandHandler {
 
     private static List<List<MenuOption>> buildAreaKeyboard(ForecastProvider provider) {
         // Two areas per row for a compact layout (9 DWD areas → 4 full rows + 1 last row).
+        // The provider name is embedded in the callback data, so the handler knows which
+        // provider's forecast to show, even when multiple providers share an area name.
         List<GeoLocation> locations = provider.geoLocations();
         List<List<MenuOption>> rows = new ArrayList<>();
         for (int i = 0; i < locations.size(); i += 2) {
             List<MenuOption> row = new ArrayList<>();
-            row.add(new MenuOption(locations.get(i).name(), AREA_PREFIX + locations.get(i).name()));
+            row.add(new MenuOption(locations.get(i).name(), areaCallback(provider, locations.get(i))));
             if (i + 1 < locations.size()) {
-                row.add(new MenuOption(locations.get(i + 1).name(), AREA_PREFIX + locations.get(i + 1).name()));
+                row.add(new MenuOption(locations.get(i + 1).name(), areaCallback(provider, locations.get(i + 1))));
             }
             rows.add(row);
         }
         return rows;
+    }
+
+    private static String areaCallback(ForecastProvider provider, GeoLocation location) {
+        return AREA_PREFIX + provider.name() + "/" + location.name();
     }
 
     private static Map<String, ForecastProvider> buildProvidersByNameMap(List<ForecastProvider> providers) {
@@ -295,24 +323,15 @@ class BotCommandHandler {
         return Map.copyOf(map);
     }
 
-    private static Map<String, ForecastProvider> buildProviderByAreaNameMap(List<ForecastProvider> providers) {
-        Map<String, ForecastProvider> map = new HashMap<>();
-        for (ForecastProvider p : providers) {
-            for (GeoLocation loc : p.geoLocations()) {
-                map.put(loc.name().toLowerCase(Locale.ROOT), p);
-            }
-        }
-        return Map.copyOf(map);
-    }
-
-    /** Returns the great-circle distance in kilometres between two WGS-84 points. */
-    private static double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+    /** Returns the great-circle distance in nautical miles between two WGS-84 points. */
+    private static double haversineNm(double lat1, double lon1, double lat2, double lon2) {
         final double R = 6371.0;
+        final double nm = 1.852;
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
         double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
                 * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) / nm;
     }
 }
