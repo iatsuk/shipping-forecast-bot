@@ -137,9 +137,8 @@ class BotCommandHandler {
 
     private void handleProviderSelected(long chatId, ForecastProvider provider) {
         List<List<MenuOption>> areaKeyboard = buildAreaKeyboard(provider);
-        String caption = provider.name() + "\n"
-                + provider.description() + "\n"
-                + "🔗 " + provider.url() + "\n\n"
+        String caption = "<b><a href=\"" + provider.url() + "\">" + provider.name() + "</a></b>" + "\n\n"
+                + provider.description() + "\n\n"
                 + "Select an area to subscribe to automatic updates:";
 
         // If the provider has a map image, show it with the area keyboard.

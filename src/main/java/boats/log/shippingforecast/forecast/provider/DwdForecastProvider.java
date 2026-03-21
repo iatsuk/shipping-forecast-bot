@@ -10,6 +10,7 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.regex.*;
 
 /**
@@ -74,8 +75,12 @@ public class DwdForecastProvider implements ForecastProvider {
 
     @Override
     public String description() {
+        String times = updateTimes().stream()
+                .map(TIME_FORMAT::format)
+                .collect(Collectors.joining(" and "));
         return "Weather and sea bulletin for the North and Baltic Sea, "
-                + "issued by DWD marine weather service Hamburg.";
+                + "issued by DWD marine weather service Hamburg.\n"
+                + "Updated daily at approx. " + times + " CET/CEST.";
     }
 
     @Override

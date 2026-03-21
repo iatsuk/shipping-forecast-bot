@@ -109,6 +109,7 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, BotIn
                     .chatId(chatId)
                     .document(new InputFile(new ByteArrayInputStream(imageData), "map.jpg"))
                     .caption(caption)
+                    .parseMode("HTML")
                     .replyMarkup(new InlineKeyboardMarkup(keyboardRows))
                     .build());
         } catch (TelegramApiRequestException e) {
