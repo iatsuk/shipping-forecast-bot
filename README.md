@@ -274,7 +274,88 @@ The architecture doc (at the repo root) covers six documented design decisions:
    `ImageCacheService` (InitializingBean) fetches once at startup; `BotInteraction.sendPhoto`
    delivers the image with the area keyboard attached.
 
-## 9. Key Gaps / What Is Not Yet Implemented
+## 9. Build and Deployment
+
+### Fat JAR
+
+`maven-shade-plugin` (3.6.2) is configured in `pom.xml`. Running `mvn package` produces a
+self-contained `target/app.jar` with all dependencies bundled and the correct `Main-Class`
+manifest entry. Signature files from signed JARs are stripped to avoid runtime verification
+errors; `META-INF/services` entries from all dependencies are merged via
+`ServicesResourceTransformer`.
+
+### VPS Setup (Ubuntu 24.04)
+
+```bash
+sudo bash scripts/vps-setup.sh "<your-ssh-public-key>"
+```
+
+What it does (idempotent for most steps):
+1. Installs Eclipse Temurin 25 JRE via the Adoptium APT repository
+2. Creates a `sfb` system user with home at `/opt/sfb`
+3. Creates `/opt/sfb/{data,logs,deploy}` and sets ownership
+4. Configures SSH access (key, password, or both — see script usage)
+5. Grants `sfb` passwordless `sudo` for `systemctl {start,stop,restart,status} sfb` only
+6. Creates a placeholder `/opt/sfb/env` (overwritten by GitHub Actions on every deploy)
+7. Installs and enables the `sfb` systemd unit at `/etc/systemd/system/sfb.service`
+8. Configures journald retention (500 MB, 1 month)
+9. Configures UFW: deny all inbound except SSH; allow all outbound
+
+After setup, trigger the first deploy from GitHub Actions (or `workflow_dispatch`). It will
+write the token and deploy the JAR. Then start the service:
+
+```bash
+sudo systemctl start sfb
+sudo journalctl -u sfb -f
+```
+
+### CI/CD — GitHub Actions
+
+`.github/workflows/deploy.yml` triggers on every push to `main` and on manual dispatch.
+
+Pipeline: checkout → Java 25 setup (with Maven cache) → `mvn package` (builds + tests) →
+write `TELEGRAM_BOT_TOKEN` to `/opt/sfb/env` → SCP `target/app.jar` and
+`scripts/logback-prod.xml` → atomic `mv` to `/opt/sfb/app.jar` →
+`sudo systemctl restart sfb` → status check.
+
+Required GitHub Actions secrets:
+
+| Secret | Value |
+|---|---|
+| `VPS_HOST` | Server IP or hostname |
+| `VPS_USER` | `sfb` |
+| `VPS_SSH_KEY` | Private key matching the public key passed to `vps-setup.sh` |
+
+### JVM Settings (in systemd unit)
+
+| Flag | Reason |
+|---|---|
+| `-Xms32m` | Start small; the bot is idle most of the time |
+| `-Xmx192m` | Sufficient for Spring context + HSQLDB + Telegram client buffers |
+| `-XX:MaxMetaspaceSize=96m` | Caps native metaspace growth |
+| `-XX:+UseZGC -XX:+ZGenerational` | Sub-millisecond GC pauses; well-suited for long-running low-traffic daemons on Java 25 |
+| `-XX:SoftMaxHeapSize=128m` | ZGC targets 128 MB; may use up to 192 MB under pressure |
+| `-Xlog:gc:...` | Rotating GC log for post-hoc diagnostics |
+
+### Production Logging
+
+`scripts/logback-prod.xml` must be deployed to `/opt/sfb/logback-prod.xml`.
+
+- Writes to `/opt/sfb/logs/app.log` with daily rotation, 30-day retention, 500 MB cap
+- Wrapped in an async appender (queue 512; drops TRACE/DEBUG under pressure, never WARN/ERROR)
+- Also writes to stdout (captured by systemd journal — `journalctl -u sfb -f`)
+- Third-party libraries (Spring, Telegram, OkHttp) suppressed to WARN
+- `boats.log.shippingforecast` at INFO
+
+### scripts/ Directory
+
+```
+scripts/
+├── vps-setup.sh       — full VPS provisioning (run once as root)
+└── logback-prod.xml   — production Logback configuration
+```
+
+## 10. Key Gaps / What Is Not Yet Implemented
 
 - Provider map images are fetched once at startup and never refreshed. If a provider changes
   its map image, the old one persists until the database is reset.

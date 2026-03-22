@@ -1,0 +1,78 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Build → Test → Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build and test
+        run: mvn -B clean package
+
+      # ------------------------------------------------------------------ #
+      # Write the token to /opt/sfb/env before restarting.                 #
+      # systemd reads EnvironmentFile=/opt/sfb/env on each start.          #
+      # Spring resolves TELEGRAM_BOT_TOKEN → telegram.bot.token via         #
+      # StandardEnvironment's SystemEnvironmentPropertySource.              #
+      # ------------------------------------------------------------------ #
+      - name: Write environment file on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            printf 'TELEGRAM_BOT_TOKEN=%s\n' '${{ secrets.TELEGRAM_BOT_TOKEN }}' \
+              > /opt/sfb/env
+            chmod 600 /opt/sfb/env
+
+      # ------------------------------------------------------------------ #
+      # SCP the fat JAR to a staging path, then atomically replace app.jar #
+      # to avoid starting from a partially written file.                   #
+      # ------------------------------------------------------------------ #
+      - name: Upload JAR to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "target/app.jar"
+          target: "/opt/sfb/deploy/"
+          strip_components: 1   # removes the "target/" prefix
+
+      - name: Upload Logback config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "scripts/logback-prod.xml"
+          target: "/opt/sfb/"
+          strip_components: 1   # removes the "scripts/" prefix
+
+      - name: Swap JAR and restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            mv /opt/sfb/deploy/app.jar /opt/sfb/app.jar
+            sudo systemctl restart sfb
+            sleep 5
+            sudo systemctl status sfb --no-pager
