@@ -5,10 +5,14 @@ on:
     branches: [ main ]
   workflow_dispatch:  # allow manual trigger from GitHub UI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy:
     name: Build → Test → Deploy
     runs-on: ubuntu-latest
+    environment: deploy-ovn
 
     steps:
       - name: Checkout source
@@ -27,8 +31,12 @@ jobs:
       # ------------------------------------------------------------------ #
       # Write the token to /opt/sfb/env before restarting.                 #
       # systemd reads EnvironmentFile=/opt/sfb/env on each start.          #
-      # Spring resolves TELEGRAM_BOT_TOKEN → telegram.bot.token via         #
-      # StandardEnvironment's SystemEnvironmentPropertySource.              #
+      # Spring resolves TELEGRAM_BOT_TOKEN → telegram.bot.token via        #
+      # StandardEnvironment's SystemEnvironmentPropertySource.             #
+      # ------------------------------------------------------------------ #
+      # ------------------------------------------------------------------ #
+      # Authentication: set VPS_SSH_KEY for key-based auth, or             #
+      # VPS_PASSWORD for password-based auth. Key takes precedence.        #
       # ------------------------------------------------------------------ #
       - name: Write environment file on server
         uses: appleboy/ssh-action@v1.0.3
@@ -36,6 +44,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
           script: |
             printf 'TELEGRAM_BOT_TOKEN=%s\n' '${{ secrets.TELEGRAM_BOT_TOKEN }}' \
               > /opt/sfb/env
@@ -51,6 +60,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
           source: "target/app.jar"
           target: "/opt/sfb/deploy/"
           strip_components: 1   # removes the "target/" prefix
@@ -61,6 +71,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
           source: "scripts/logback-prod.xml"
           target: "/opt/sfb/"
           strip_components: 1   # removes the "scripts/" prefix
@@ -71,6 +82,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
           script: |
             mv /opt/sfb/deploy/app.jar /opt/sfb/app.jar
             sudo systemctl restart sfb
