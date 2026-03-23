@@ -123,21 +123,21 @@ if [[ -n "$SSH_PASSWORD" ]]; then
 fi
 
 # --------------------------------------------------------------------------- #
-# sudoers rule — sfb user may restart its own service, nothing else
+# polkit rule — allow sfb to manage sfb.service without sudo
+# systemctl communicates via D-Bus; polkit authorises the call unconditionally
+# (Result.YES), so it works in non-interactive SSH sessions too.
 # --------------------------------------------------------------------------- #
-echo "==> [6/9] Configuring sudoers"
-SUDOERS_FILE="/etc/sudoers.d/${SERVICE_NAME}"
-cat > "${SUDOERS_FILE}" <<EOF
-# Allow the sfb service account to manage its own systemd unit.
-# !requiretty lets NOPASSWD work in non-interactive SSH sessions (e.g. GitHub Actions).
-Defaults:${APP_USER} !requiretty
-${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart ${SERVICE_NAME}
-${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${SERVICE_NAME}
-${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop ${SERVICE_NAME}
-${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl status ${SERVICE_NAME}
+echo "==> [6/9] Configuring polkit rule"
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/50-sfb.rules <<EOF
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "${SERVICE_NAME}.service" &&
+        subject.user === "${APP_USER}") {
+        return polkit.Result.YES;
+    }
+});
 EOF
-chmod 440 "${SUDOERS_FILE}"
-visudo -cf "${SUDOERS_FILE}"
 
 # --------------------------------------------------------------------------- #
 # Placeholder env file — GitHub Actions will write the real token here

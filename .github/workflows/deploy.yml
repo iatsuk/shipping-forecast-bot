@@ -83,6 +83,6 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             mv /opt/sfb/deploy/app.jar /opt/sfb/app.jar
-            sudo systemctl restart sfb
+            systemctl restart sfb
             sleep 5
-            sudo systemctl status sfb --no-pager
+            systemctl status sfb --no-pager
