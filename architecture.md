@@ -486,6 +486,75 @@ cannot tell which source it came from.
 
 ---
 
+## Admin Command (/status)
+
+## Problem
+The bot operator needs a way to inspect the bot's runtime state without SSH access — including
+user/subscription counts, system health indicators, and which build is currently deployed.
+The command must be restricted to a single trusted identity (the admin) and invisible to
+ordinary users.
+
+## Decision
+Introduce `AdminCommandHandler` as a package-private class in the `telegram` package,
+parallel to `BotCommandHandler`. It is constructed inside `TelegramBot` (same pattern used
+for `BotCommandHandler`) and receives the same `BotInteraction` reference.
+
+Admin identity is a single `adminChatId` long value read from
+`telegram.bot.admin.chat.id` (application property) or the `TELEGRAM_BOT_ADMIN_CHAT_ID`
+environment variable at runtime. The check is performed in `TelegramBot.consume()` before
+the handler is invoked — non-admin messages to `/status` are silently dropped.
+
+Build metadata (commit hash, build time) is embedded at compile time via Maven resource
+filtering into `build.properties`. The `git-commit-id-maven-plugin` populates
+`git.commit.id.abbrev` and `git.build.time` during the `initialize` phase; the plugin is
+configured with `failOnNoGitDirectory=false` so builds without a `.git` directory still
+succeed. `AppConfig` loads `build.properties` as a `@PropertySource` and constructs a
+`BuildInfo` record bean injected into `TelegramBot` and passed to `AdminCommandHandler`.
+
+## Structure
+
+- `BuildInfo` — immutable record `(commitHash, buildTime)` in the root package
+- `AdminCommandHandler` — package-private; handles `/status`; reads repository counts,
+  JVM metrics (via `ManagementFactory`), and `BuildInfo`
+- `TelegramBot` — gains `adminChatId` and `BuildInfo` constructor parameters; constructs
+  `AdminCommandHandler`; routes `/status` only when `chatId == adminChatId`
+- `UserRepository.count()` / `SubscriptionRepository.count()` — new interface methods,
+  implemented in the JDBC repositories via `SELECT COUNT(*)`
+- `build.properties` — Maven-filtered resource with `${git.commit.id.abbrev}` and
+  `${git.build.time}` placeholders
+- `git-commit-id-maven-plugin` in `pom.xml` — populates the Maven properties above
+
+## Applied Principles / Patterns
+
+- **SOLID — Single Responsibility**: `AdminCommandHandler` owns admin command logic only;
+  `TelegramBot` owns Telegram mechanics only
+- **SOLID — Open-Closed**: adding more admin commands requires only changes inside
+  `AdminCommandHandler`; `TelegramBot` routing stays unchanged
+- **GRASP — Protected Variations**: the admin check lives entirely in `TelegramBot.consume()`,
+  shielding `AdminCommandHandler` from authentication concerns
+- **GoF — same construction pattern as BotCommandHandler**: both handlers are non-Spring,
+  package-private, and constructed by `TelegramBot` to avoid a circular Spring dependency
+
+## Why This Approach
+
+A single long `adminChatId` is the minimal viable identity check for a single-operator bot.
+Telegram chat IDs are stable and opaque to other users — there is no way for a non-admin
+to impersonate the admin short of compromising the server. Silent drop (no reply to
+non-admins) avoids disclosing that the command exists.
+
+Embedding build info at compile time avoids runtime git dependency and works correctly in
+Docker/fat-JAR deployments where `.git` is not present. Falling back to `"unknown"` via
+`@Value("${build.commit:unknown}")` keeps the application startable in all environments.
+
+## Tradeoffs
+
+- Only one admin is supported. Multiple admins would require a set of chat IDs, which is
+  not needed at the current scale.
+- `/status` is not registered as a Telegram bot command (via `setMyCommands`) so it does
+  not appear in the command menu — intentional, to keep it invisible to regular users.
+
+---
+
 ## Provider Map Image Caching
 
 ## Problem

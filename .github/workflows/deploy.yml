@@ -44,7 +44,9 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            printf 'TELEGRAM_BOT_TOKEN=%s\n' '${{ secrets.TELEGRAM_BOT_TOKEN }}' \
+            printf 'TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_BOT_ADMIN_CHAT_ID=%s\n' \
+              '${{ secrets.TELEGRAM_BOT_TOKEN }}' \
+              '${{ secrets.TELEGRAM_BOT_ADMIN_CHAT_ID }}' \
               > /opt/sfb/env
             chmod 600 /opt/sfb/env
 

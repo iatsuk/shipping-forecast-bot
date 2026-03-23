@@ -40,6 +40,12 @@ public class JdbcSubscriptionRepository implements SubscriptionRepository {
     }
 
     @Override
+    public int count() {
+        Integer result = jdbc.queryForObject("SELECT COUNT(*) FROM user_subscription", Integer.class);
+        return result != null ? result : 0;
+    }
+
+    @Override
     public void deleteAllByChatId(long chatId) {
         jdbc.update("DELETE FROM user_subscription WHERE chat_id = ?", chatId);
     }

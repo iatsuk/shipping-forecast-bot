@@ -1,5 +1,6 @@
 package boats.log.shippingforecast.telegram;
 
+import boats.log.shippingforecast.BuildInfo;
 import boats.log.shippingforecast.forecast.ForecastCacheRepository;
 import boats.log.shippingforecast.forecast.ForecastProvider;
 import boats.log.shippingforecast.forecast.ImageCacheRepository;
@@ -41,18 +42,24 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, BotIn
 
     private final TelegramClient client;
     private final BotCommandHandler commandHandler;
+    private final AdminCommandHandler adminCommandHandler;
+    private final long adminChatId;
 
     public TelegramBot(
             @Value("${telegram.bot.token}") String token,
+            @Value("${telegram.bot.admin.chat.id}") long adminChatId,
             List<ForecastProvider> providers,
             ForecastCacheRepository cacheRepository,
             ImageCacheRepository imageCacheRepository,
             UserRepository userRepository,
-            SubscriptionRepository subscriptionRepository
+            SubscriptionRepository subscriptionRepository,
+            BuildInfo buildInfo
     ) {
         this.client = new OkHttpTelegramClient(token);
+        this.adminChatId = adminChatId;
         this.commandHandler = new BotCommandHandler(
                 this, providers, cacheRepository, imageCacheRepository, userRepository, subscriptionRepository);
+        this.adminCommandHandler = new AdminCommandHandler(this, userRepository, subscriptionRepository, providers, cacheRepository, buildInfo);
     }
 
     // --- BotInteraction / MessageSender ---
@@ -149,6 +156,8 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, BotIn
                 commandHandler.handleStart(chatId, firstName != null ? firstName : "sailor");
             } else if ("/stop".equals(text)) {
                 commandHandler.handleStop(chatId);
+            } else if ("/status".equals(text) && chatId == adminChatId) {
+                adminCommandHandler.handleStatus(chatId);
             }
         }
 

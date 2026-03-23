@@ -11,6 +11,7 @@ Root package: `boats.log.shippingforecast`
 boats.log.shippingforecast
 ├── App.java                          — main entry point
 ├── AppConfig.java                    — Spring @Configuration (all beans wired here)
+├── BuildInfo.java                    — record (commitHash, buildTime) loaded from build.properties
 │
 ├── forecast/                         — domain contracts + domain records
 │   ├── ForecastProvider.java         — interface (Strategy)
@@ -49,6 +50,7 @@ boats.log.shippingforecast
 └── telegram/
     ├── TelegramBot.java              — Telegram long-polling consumer + BotInteraction impl
     ├── BotCommandHandler.java        — all command and menu navigation logic
+    ├── AdminCommandHandler.java      — /status command (admin-only)
     ├── BotInteraction.java           — interface: send + sendMenu + sendPhoto + answerCallbackQuery
     ├── MenuOption.java               — record (label, callbackData) for inline keyboard buttons
     ├── MessageSender.java            — interface for plain text sends (used by ForecastDispatcher)
@@ -209,6 +211,7 @@ without real time.
 [subscribe button]  →  subscribe user  →  return to provider list
 [unsubscribe button]→  unsubscribe user  →  return to provider list
 /stop   →  delete all user data  →  goodbye
+/status →  (admin only) user count, subscription count, system health, build info
 ```
 
 Callback data prefixes: `provider:`, `area:`, `subscribe:`, `unsubscribe:`, `my_subscriptions`.
@@ -245,7 +248,7 @@ Java target: 25. No Lombok, no Hibernate, no Spring Boot.
 
 ## 8. architecture.md Summary
 
-The architecture doc (at the repo root) covers six documented design decisions:
+The architecture doc (at the repo root) covers the following documented design decisions:
 
 1. **Forecast package structure** — split into `forecast` (contracts), `forecast.infra` (HTTP +
    JDBC), `forecast.provider` (concrete parsers), `forecast.scheduler` (orchestration).
@@ -269,7 +272,12 @@ The architecture doc (at the repo root) covers six documented design decisions:
    `MetOfficeForecastProvider` (UK Met Office, 31 areas, grouped `<h3>` headings); each
    prepends its `name()` to forecast text so overlapping areas (e.g. German Bight) are
    always attributed to the correct source.
-9. **Provider map image caching** — `ForecastProvider.mapImageUrl()` optional method;
+10. **Admin command** — `/status` restricted to `telegram.bot.admin.chat.id`; reports user
+    count, subscription count, JVM memory, system load, uptime, and build info (commit hash,
+    build time embedded at compile time via `git-commit-id-maven-plugin` + Maven resource filtering).
+    `AdminCommandHandler` is constructed by `TelegramBot` (same non-Spring pattern as
+    `BotCommandHandler`). Non-admin messages to `/status` are silently dropped.
+11. **Provider map image caching** — `ForecastProvider.mapImageUrl()` optional method;
    `ImageCacheRepository` + `JdbcImageCacheRepository` for `LONGVARBINARY` storage;
    `ImageCacheService` (InitializingBean) fetches once at startup; `BotInteraction.sendPhoto`
    delivers the image with the area keyboard attached.
@@ -325,6 +333,8 @@ Required GitHub Actions secrets:
 | `VPS_HOST` | Server IP or hostname |
 | `VPS_USER` | `sfb` |
 | `VPS_SSH_KEY` | Private key matching the public key passed to `vps-setup.sh` |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from BotFather |
+| `TELEGRAM_BOT_ADMIN_CHAT_ID` | Telegram chat ID of the bot admin (get via @userinfobot) |
 
 ### JVM Settings (in systemd unit)
 
@@ -333,7 +343,7 @@ Required GitHub Actions secrets:
 | `-Xms32m` | Start small; the bot is idle most of the time |
 | `-Xmx192m` | Sufficient for Spring context + HSQLDB + Telegram client buffers |
 | `-XX:MaxMetaspaceSize=96m` | Caps native metaspace growth |
-| `-XX:+UseZGC -XX:+ZGenerational` | Sub-millisecond GC pauses; well-suited for long-running low-traffic daemons on Java 25 |
+| `-XX:+UseZGC` | Sub-millisecond GC pauses; Generational ZGC is the default since Java 24 |
 | `-XX:SoftMaxHeapSize=128m` | ZGC targets 128 MB; may use up to 192 MB under pressure |
 | `-Xlog:gc:...` | Rotating GC log for post-hoc diagnostics |
 

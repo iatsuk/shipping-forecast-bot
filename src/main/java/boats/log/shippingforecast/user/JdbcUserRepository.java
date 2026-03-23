@@ -36,6 +36,12 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public int count() {
+        Integer result = jdbc.queryForObject("SELECT COUNT(*) FROM telegram_user", Integer.class);
+        return result != null ? result : 0;
+    }
+
+    @Override
     public void delete(long chatId) {
         jdbc.update("DELETE FROM telegram_user WHERE chat_id = ?", chatId);
     }

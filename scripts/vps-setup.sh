@@ -179,7 +179,6 @@ ExecStart=/usr/bin/java \\
   -Xmx192m \\
   -XX:MaxMetaspaceSize=96m \\
   -XX:+UseZGC \\
-  -XX:+ZGenerational \\
   -XX:SoftMaxHeapSize=128m \\
   -Xlog:gc:${APP_DIR}/logs/gc.log::filecount=3,filesize=5m \\
   -Dlogback.configurationFile=${APP_DIR}/logback-prod.xml \\

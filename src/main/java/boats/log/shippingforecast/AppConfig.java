@@ -21,10 +21,11 @@ import java.util.random.RandomGenerator;
 
 @Configuration
 @EnableScheduling
-// ignoreResourceNotFound=true: a file is not required in the classpath.
-// The token is provided at runtime via the TELEGRAM_BOT_TOKEN environment variable,
-// which Spring's StandardEnvironment maps to the telegram.bot.token property automatically.
+// ignoreResourceNotFound=true: files are not required in the classpath.
+// Runtime tokens are provided via environment variables (TELEGRAM_BOT_TOKEN, etc.),
+// which Spring's StandardEnvironment maps to the corresponding dot-notation properties.
 @PropertySource(value = "classpath:application.properties", ignoreResourceNotFound = true)
+@PropertySource(value = "classpath:build.properties", ignoreResourceNotFound = true)
 @ComponentScan("boats.log.shippingforecast")
 public class AppConfig {
 
@@ -61,6 +62,13 @@ public class AppConfig {
     @Bean
     public JdbcTemplate jdbcTemplate(DataSource dataSource) {
         return new JdbcTemplate(dataSource);
+    }
+
+    @Bean
+    public BuildInfo buildInfo(
+            @Value("${build.commit:unknown}") String commit,
+            @Value("${build.time:unknown}") String time) {
+        return new BuildInfo(commit, time);
     }
 
     @Bean

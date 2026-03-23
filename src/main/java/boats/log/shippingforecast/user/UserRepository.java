@@ -12,6 +12,9 @@ public interface UserRepository {
 
     Optional<TelegramUser> findById(long chatId);
 
+    /** Returns the total number of registered users. */
+    int count();
+
     /**
      * Deletes the user and all associated data. Subscriptions are removed automatically
      * via the ON DELETE CASCADE constraint. Called when a user blocks or stops the bot,

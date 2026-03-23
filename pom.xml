@@ -102,7 +102,50 @@
   <build>
     <finalName>app</finalName>
 
+    <!-- Filter only build.properties so Maven substitutes ${git.*} placeholders;
+         all other resources are copied verbatim to avoid mangling binary files. -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+        <excludes>
+          <exclude>build.properties</exclude>
+        </excludes>
+      </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+        <includes>
+          <include>build.properties</include>
+        </includes>
+      </resource>
+    </resources>
+
     <plugins>
+      <!-- Populate git.commit.id.abbrev and git.build.time for build.properties filtering.
+           failOnNoGitDirectory=false keeps the build green in environments without .git. -->
+      <plugin>
+        <groupId>io.github.git-commit-id</groupId>
+        <artifactId>git-commit-id-maven-plugin</artifactId>
+        <version>9.0.2</version>
+        <executions>
+          <execution>
+            <goals><goal>revision</goal></goals>
+            <phase>initialize</phase>
+          </execution>
+        </executions>
+        <configuration>
+          <failOnNoGitDirectory>false</failOnNoGitDirectory>
+          <generateGitPropertiesFile>false</generateGitPropertiesFile>
+          <dateFormat>yyyy-MM-dd HH:mm:ss z</dateFormat>
+          <dateFormatTimeZone>UTC</dateFormatTimeZone>
+          <includeOnlyProperties>
+            <includeOnlyProperty>git.commit.id.abbrev</includeOnlyProperty>
+            <includeOnlyProperty>git.build.time</includeOnlyProperty>
+          </includeOnlyProperties>
+        </configuration>
+      </plugin>
+
       <!-- Produce a self-contained fat JAR for deployment -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

@@ -135,6 +135,7 @@ class ForecastDispatcherTest {
         @Override public List<Long> findChatIdsByArea(String area) {
             return subscribersByArea.getOrDefault(area, List.of());
         }
+        @Override public int count() { return 0; }
         @Override public void deleteAllByChatId(long chatId) {}
     }
 
@@ -143,6 +144,7 @@ class ForecastDispatcherTest {
 
         @Override public void register(TelegramUser user) {}
         @Override public Optional<TelegramUser> findById(long chatId) { return Optional.empty(); }
+        @Override public int count() { return 0; }
         @Override public void delete(long chatId) { deletedChatIds.add(chatId); }
     }
 }
