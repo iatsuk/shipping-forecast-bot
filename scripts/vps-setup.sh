@@ -128,7 +128,9 @@ fi
 echo "==> [6/9] Configuring sudoers"
 SUDOERS_FILE="/etc/sudoers.d/${SERVICE_NAME}"
 cat > "${SUDOERS_FILE}" <<EOF
-# Allow the sfb service account to manage its own systemd unit
+# Allow the sfb service account to manage its own systemd unit.
+# !requiretty lets NOPASSWD work in non-interactive SSH sessions (e.g. GitHub Actions).
+Defaults:${APP_USER} !requiretty
 ${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart ${SERVICE_NAME}
 ${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${SERVICE_NAME}
 ${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop ${SERVICE_NAME}

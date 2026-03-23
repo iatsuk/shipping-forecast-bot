@@ -81,6 +81,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           password: ${{ secrets.VPS_PASSWORD }}
+          request_pty: true
           script: |
             mv /opt/sfb/deploy/app.jar /opt/sfb/app.jar
             sudo systemctl restart sfb
