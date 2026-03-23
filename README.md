@@ -284,7 +284,7 @@ manifest entry. Signature files from signed JARs are stripped to avoid runtime v
 errors; `META-INF/services` entries from all dependencies are merged via
 `ServicesResourceTransformer`.
 
-### VPS Setup (Ubuntu 24.04)
+### VPS Setup (Debian 12)
 
 ```bash
 sudo bash scripts/vps-setup.sh "<your-ssh-public-key>"

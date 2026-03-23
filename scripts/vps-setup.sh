@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # VPS setup script for shipping-forecast-bot
-# Target OS : Ubuntu 24.04 LTS
+# Target OS : Debian 12
 # Run as    : root
 #
 # Usage:
@@ -128,10 +128,11 @@ fi
 echo "==> [6/9] Configuring sudoers"
 SUDOERS_FILE="/etc/sudoers.d/${SERVICE_NAME}"
 cat > "${SUDOERS_FILE}" <<EOF
-${APP_USER} ALL=(root) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}, \
-                                  /bin/systemctl start ${SERVICE_NAME}, \
-                                  /bin/systemctl stop ${SERVICE_NAME}, \
-                                  /bin/systemctl status ${SERVICE_NAME}
+# Allow the sfb service account to manage its own systemd unit
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart ${SERVICE_NAME}
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${SERVICE_NAME}
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop ${SERVICE_NAME}
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl status ${SERVICE_NAME}
 EOF
 chmod 440 "${SUDOERS_FILE}"
 visudo -cf "${SUDOERS_FILE}"
