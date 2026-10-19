@@ -73,6 +73,32 @@ class MetOfficeForecastProviderTest {
     }
 
     @Test
+    void isFresh_acceptsPublishedTimestampWithoutSeconds() {
+        String content = pageWithDatetime("2026-10-19T10:30Z");
+        Instant expectedAfter = Instant.parse("2026-10-19T10:00:00Z");
+
+        assertThat(provider.isFresh(content, expectedAfter)).isTrue();
+    }
+
+    @Test
+    void isFresh_comparesMinutePrecisionTimestampAgainstExpectedInstant() {
+        String content = pageWithDatetime("2026-10-19T10:30Z");
+        Instant published = Instant.parse("2026-10-19T10:30:00Z");
+
+        assertThat(provider.isFresh(content, published)).isTrue();
+        assertThat(provider.isFresh(content, published.plusSeconds(1))).isFalse();
+    }
+
+    @Test
+    void isFresh_respectsPublishedTimestampOffset() {
+        String content = pageWithDatetime("2026-10-19T11:30+01:00");
+        Instant published = Instant.parse("2026-10-19T10:30:00Z");
+
+        assertThat(provider.isFresh(content, published)).isTrue();
+        assertThat(provider.isFresh(content, published.plusSeconds(1))).isFalse();
+    }
+
+    @Test
     void isFresh_returnsTrueWhenTimestampElementAbsent() {
         // Fail-open: if the page structure changes and #sea-forecast-time is missing,
         // assume content is fresh to avoid infinite retry loops.

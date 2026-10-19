@@ -151,9 +151,10 @@ Two concrete implementations:
 - **`MetOfficeForecastProvider`** — 31 sea areas around the British Isles; publishes at 0500,
   1100, 1700, 2300 UTC; the page groups related areas under shared `<h3>` headings (e.g.
   "Viking, North Utsire") — each individual area is mapped to its own `GeoLocation` and
-  receives the group's forecast text; parses the "Issued by…at HH:mm (UTC)" line for
-  staleness detection; Trafalgar's parenthetical note "(issued 0015 UTC)" is stripped from
-  the heading during parsing.
+  receives the group's forecast text. Freshness detection reads the machine-readable
+  `datetime` attribute in `#sea-forecast-time`, accepting ISO-8601 offsets with or without
+  seconds and comparing the resulting instant. Trafalgar's parenthetical note
+  "(issued 0015 UTC)" is stripped from the heading during parsing.
 
 Both providers prepend their `name()` as the first line of every forecast message so users can
 always tell which source a forecast comes from, even when different providers cover overlapping

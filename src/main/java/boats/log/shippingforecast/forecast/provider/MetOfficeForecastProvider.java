@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -122,7 +123,7 @@ public class MetOfficeForecastProvider implements ForecastProvider {
         if (timeEl == null) {
             return true;
         }
-        Instant published = Instant.parse(timeEl.attr("datetime"));
+        Instant published = OffsetDateTime.parse(timeEl.attr("datetime")).toInstant();
         return !published.isBefore(expectedAfter);
     }
 
